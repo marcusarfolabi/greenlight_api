@@ -40,7 +40,18 @@ def decode_token(token: str) -> dict:
             detail="Could not validate credentials",
         ) from exc
 
+def create_refresh_token(data: dict) -> str: 
+        to_encode = data.copy()
+        expire = datetime.utcnow() + timedelta(days=7)  # Refresh token lasts 7 days
+        to_encode.update({"exp": expire, "type": "refresh"})
+        return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
+def create_password_reset_token(user_id: int) -> str:
+        """Generate a secure short-lived token for password recovery."""
+        expire = datetime.utcnow() + timedelta(minutes=15)  # Link expires in 15 mins
+        to_encode = {"sub": str(user_id), "exp": expire, "action": "password_reset"}
+        return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    
 async def get_current_user(credentials: HTTPAuthCredentials = Depends(security)) -> str:
     token = credentials.credentials
     payload = decode_token(token)
@@ -52,3 +63,5 @@ async def get_current_user(credentials: HTTPAuthCredentials = Depends(security))
         )
 
     return str(sub_value)
+
+

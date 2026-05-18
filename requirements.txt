@@ -7,3 +7,6 @@ passlib[bcrypt]
 python-multipart
 pydantic-settings
 pyjwt
+fastapi-mail
+google-auth
+requests

@@ -1,12 +1,13 @@
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
+from jose import jwt, JWTError
 
 from app.core.security import hash_password
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
-
-
+from app.core.config import settings
 class UserService:
     """Service layer for user operations."""
 
@@ -67,5 +68,6 @@ class UserService:
         db.delete(db_user)
         db.commit()
         return db_user
-    
+     
+ 
 user_service = UserService()

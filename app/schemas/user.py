@@ -7,6 +7,24 @@ from app.models.user import UserRole
 from app.schemas.organization import OrganizationCreate, OrganizationResponse
 
 
+class VerifyOTPRequest(BaseModel):
+    email: EmailStr
+    otp: str
+ 
+    
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+class TokenRefreshRequest(BaseModel):
+    refresh_token: str
+
+class GoogleTokenPayload(BaseModel):
+    token: str
+    
 class UserBase(BaseModel):
     username: str
     email: EmailStr
@@ -16,6 +34,8 @@ class UserCreate(UserBase):
     password: str
     role: UserRole = UserRole.USER
     organization: Optional[OrganizationCreate] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_host_organization(self) -> "UserCreate":
@@ -26,6 +46,8 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     email: Optional[EmailStr] = None
     is_active: Optional[bool] = None
 
