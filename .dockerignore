@@ -1,5 +1,20 @@
+# Exclude the massive git history
+.git
+.gitignore
+
+# Exclude local environments
 venv/
+.venv/
 __pycache__/
-*.pyc
-.git/
-docker-compose.yml
+node_modules/
+
+# Exclude build artifacts and logs
+*.log
+*.sqlite3
+.vscode/
+.idea/
+
+# Exclude Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose*

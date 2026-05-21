@@ -1,4 +1,21 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-.pytest_cache/
-.mypy_cache/
+*$py.class 
+.git
+
+# Environments
+.venv/
+venv/
+ENV/
+node_modules 
+*.sqlite3
+.env
+
+# Pylance/IDE
+.vscode/
+.idea/ 
+.env.docker
+docker-compose.local.yml
+start-local.ps1
+note.txt 
