@@ -1,7 +1,7 @@
 import logging
 import secrets
 from datetime import datetime, timedelta
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Response, Form
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 
@@ -11,7 +11,6 @@ from google.auth.transport import requests as google_requests
 from app.core.config import settings 
 from app.core.security import create_access_token, create_refresh_token, verify_password, hash_password
 from app.db.session import get_db
-from app.models.user import UserRole
 from app.schemas.user import ForgotPasswordRequest, GoogleTokenPayload, ResendOTPRequest, ResetPasswordRequest, TokenRefreshRequest, UserCreate, UserResponse, VerifyOTPRequest
 from app.services.user_service import UserService           
 from app.services.mail_service import mail_service  
@@ -21,10 +20,15 @@ from app.core.cache import otp_cache
 router = APIRouter()
 logger = logging.getLogger(__name__) 
 
-
 @router.post("/login")
-async def login(username: str, password: str, response: Response, db: Session = Depends(get_db)):
+async def login(
+    username: str = Form(...),   
+    password: str = Form(...),   
+    response: Response = Response(),  
+    db: Session = Depends(get_db)
+):
     user = UserService.get_user_by_login(db, username)
+    
     if not user or not verify_password(password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -38,14 +42,13 @@ async def login(username: str, password: str, response: Response, db: Session = 
     }
     access_token = create_access_token(data=token_data)
     
-    # Set the secure token as an HttpOnly Cookie
     response.set_cookie(
         key="auth_token",
         value=access_token,
-        httponly=True,       # Prevents JavaScript reading the token (Stops Postman exfiltration)
-        secure=True,         # Ensures cookie is only sent over HTTPS connections
-        samesite="lax",      # Guards against Cross-Site Request Forgery (CSRF)
-        max_age=3600,        # Match access token duration (e.g., 1 hour)
+        httponly=True,
+        secure=False,  # Set to True only if using HTTPS in production
+        samesite="lax",
+        max_age=3600,
         path="/"
     )
 
@@ -57,8 +60,6 @@ async def login(username: str, password: str, response: Response, db: Session = 
             "role": user.role
         }
     }
-
- 
 @router.post("/refresh")
 async def refresh_token(payload: TokenRefreshRequest, db: Session = Depends(get_db)):
     """Exchange a valid, unexpired refresh token for a brand new access token."""
@@ -204,7 +205,7 @@ async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db:
         org_name=org_name
     )
     
-    otp_code = f"{secrets.randbelow(900000) + 100000}"
+    otp_code = f"{secrets.randbelow(9000) + 1000}"
     expire = datetime.utcnow() + timedelta(minutes=15)
         
     otp_cache.set_otp(email=new_user.email, otp=otp_code, expires_at=expire)
@@ -225,9 +226,9 @@ async def resend_otp(payload: ResendOTPRequest, background_tasks: BackgroundTask
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
-    otp_code = f"{secrets.randbelow(900000) + 100000}"
+    otp_code = f"{secrets.randbelow(9000) + 1000}"
     expire = datetime.utcnow() + timedelta(minutes=15)
-
+ 
     otp_cache.set_otp(email=user.email, otp=otp_code, expires_at=expire)
     background_tasks.add_task(
         mail_service.send_email_confirmation,
@@ -245,13 +246,11 @@ async def forgot_password(payload: ForgotPasswordRequest, background_tasks: Back
     user = UserService.get_user_by_email(db, payload.email)
      
     if user:
-        otp_code = f"{secrets.randbelow(900000) + 100000}"
+        otp_code = f"{secrets.randbelow(9000) + 1000}"
         expire = datetime.utcnow() + timedelta(minutes=15)
         
-        # 1. Persist the credentials inside our secure runtime tracker storage
         otp_cache.set_otp(email=user.email, otp=otp_code, expires_at=expire)
         
-        # 2. Fire the mail worker
         user_display_name = getattr(user, 'first_name', user.username) or "User"
         background_tasks.add_task(
             mail_service.send_password_reset_email,
@@ -259,13 +258,13 @@ async def forgot_password(payload: ForgotPasswordRequest, background_tasks: Back
             name=user_display_name,
             otp=otp_code 
         )
-        logger.info(f"Password reset OTP sent to background queue for user: {user.email}")
-        
+         
     return {"detail": "If the email is registered, a password recovery code has been generated."}
 
 @router.post("/verify-otp")
 async def verify_otp(payload: VerifyOTPRequest, db: Session = Depends(get_db)):
     """Checks cache validation accuracy. Destroys entry on match and returns a transient payload modifier token."""
+    print(f"Received OTP verification request for email: {payload.email} with OTP: {payload.otp}")
     is_valid = otp_cache.verify_and_destroy_otp(email=payload.email, incoming_otp=payload.otp)
     
     if not is_valid:
