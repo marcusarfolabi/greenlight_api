@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, model_validator
 from app.models.user import UserRole
 from app.schemas.organization import OrganizationCreate, OrganizationResponse
 
+class ResendOTPRequest(BaseModel):
+    email: EmailStr
 
 class VerifyOTPRequest(BaseModel):
     email: EmailStr
@@ -29,19 +31,21 @@ class UserBase(BaseModel):
     username: str
     email: EmailStr
 
-
 class UserCreate(UserBase):
     password: str
-    role: UserRole = UserRole.USER
-    organization: Optional[OrganizationCreate] = None
+    role: str = "user" 
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+class UserOrgCreate(BaseModel):
+    user: UserCreate
+    organization: OrganizationCreate
 
     @model_validator(mode="after")
-    def validate_host_organization(self) -> "UserCreate":
-        if self.role == UserRole.HOST and self.organization is None:
-            raise ValueError("Organization data is required when role is host")
+    def validate_host_organization(self) -> "UserOrgCreate":
+        if self.user.role == UserRole.HOST and self.organization is None:
+            raise ValueError("Organization data is required when role is HOST")
         return self
+    
 
 
 class UserUpdate(BaseModel):
@@ -60,7 +64,10 @@ class UserResponse(UserBase):
     is_active: bool
     created_at: datetime
     owned_organization: Optional[OrganizationResponse] = None
-
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    username: str
+    email: EmailStr
 
 class Token(BaseModel):
     model_config = ConfigDict(from_attributes=True) # Pydantic V2

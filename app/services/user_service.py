@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import enum
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -37,7 +38,7 @@ class UserService:
             email=user_data.email,
             username=user_data.username,
             hashed_password=hash_password(user_data.password),
-            role=user_data.role,
+            role=user_data.role.value if isinstance(user_data.role, enum.Enum) else user_data.role,
         )
         db.add(db_user)
         db.commit()

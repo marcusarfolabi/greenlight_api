@@ -23,10 +23,13 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
+    first_name: Mapped[Optional[str]] = mapped_column(String(255))
+    last_name: Mapped[Optional[str]] = mapped_column(String(255))
     
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.USER)
+    role: Mapped[str] = mapped_column(String(50), default="user")    
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
+    
     
     # Relationships
     owned_organization: Mapped[Optional["Organization"]] = relationship(back_populates="owner", uselist=False)

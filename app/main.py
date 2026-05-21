@@ -1,11 +1,18 @@
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api import api_router
+from app.db.session import engine  
+from app.models.base import Base
+
+load_dotenv(dotenv_path=".env.docker")
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="High-performance API for Stalwart Mail & Omnichannel Communication",
+    description="Host the live arena for gamers, streamers, and esports enthusiasts. Watch live streams, join tournaments, and connect with the gaming community.",
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -25,8 +32,8 @@ app.add_middleware(
     allow_headers=["*"],
 ) 
 
-app.include_router(api_router, prefix="/api/v1")
+app.include_router(api_router, prefix="/v1")
 
-@app.get("/health")
-async def health_check():
-    return {"status": "ok"}
+@app.get("/")
+async def root():
+    return {"status": "Greenlight is operational", "environment": "production"}

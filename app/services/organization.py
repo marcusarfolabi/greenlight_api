@@ -1,10 +1,12 @@
+import logging
 from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
 
 from app.models.organization import Organization
-from app.models.user import User, UserRole
 from app.schemas.organization import OrganizationCreate
-from app.schemas.user import UserCreate
-from app.core.security import hash_password 
+
+
+logger = logging.getLogger(__name__)
 
 class OrganizationService:
     """Service layer for organization and host onboarding."""
@@ -13,38 +15,32 @@ class OrganizationService:
     def get_by_subdomain(db: Session, subdomain: str) -> Organization | None:
         return db.query(Organization).filter(Organization.subdomain == subdomain).first()
 
+    
     @staticmethod
-    def create_organization(
-        db: Session, organization_data: OrganizationCreate, owner_id: int
-    ) -> Organization:
-        organization = Organization(
-            name=organization_data.name,
-            subdomain=organization_data.subdomain,
-            industry=organization_data.industry,
-            owner_id=owner_id,
-        )
-        db.add(organization)
-        db.flush()
-        return organization
+    def create_organization_for_user(db: Session, user_id: int, org_data: OrganizationCreate) -> Organization:
+        """
+        Creates a new organization in the database and links it to a specific host user.
+        """
+        try:
+            db_org = Organization(
+                name=org_data.name,
+                subdomain=org_data.subdomain,
+                owner_id=user_id,          
+            )
+            
+            db.add(db_org)
+            db.commit()
+            db.refresh(db_org)
+            
+            logger.info(f"Successfully created organization '{db_org.name}' for user ID {user_id}")
+            return db_org
 
-    @staticmethod
-    def create_host_with_organization(db: Session, user_data: UserCreate) -> User:
-        if user_data.organization is None:
-            raise ValueError("Organization data is required for host registration")
-
-        user = User(
-            email=user_data.email,
-            username=user_data.username,
-            hashed_password=hash_password(user_data.password),
-            role=UserRole.HOST,
-        )
-        db.add(user)
-        db.flush()
-
-        OrganizationService.create_organization(db, user_data.organization, user.id)
-
-        db.commit()
-        db.refresh(user)
-        return user
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to create organization for user {user_id}. Error: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An error occurred while creating your workspace setup."
+            )
  
 organization_service = OrganizationService()

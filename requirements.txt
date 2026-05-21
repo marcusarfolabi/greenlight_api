@@ -9,4 +9,4 @@ pydantic-settings
 pyjwt
 fastapi-mail
 google-auth
-requests
+requests 

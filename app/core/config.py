@@ -24,8 +24,12 @@ class Settings(BaseSettings):
     RESEND_FROM_EMAIL: str = "hello@falconmail.online"
     APP_NAME: str = "Green Light Quiz" 
     
-     
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+    ADMIN_USERNAME: str = ""
+    ADMIN_PASSWORD: str = ""
+    ADMIN_HASHED_PASSWORD: str = ""
+
+    # Let Pydantic handle validation naturally from fields or the env file
+    DATABASE_URL: str = ""
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
@@ -34,14 +38,14 @@ class Settings(BaseSettings):
             return v.replace("postgres://", "postgresql://", 1)
         return v
  
+    # Force Pydantic to read our .env.docker file automatically!
     model_config = SettingsConfigDict(
-        env_file=None, 
+        env_file=".env.docker", 
+        env_file_encoding="utf-8",
         extra="ignore"
     )
 
-
 settings = Settings()
-
 
 mail_conf = ConnectionConfig(
     TEMPLATE_FOLDER=TEMPLATE_FOLDER,

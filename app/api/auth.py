@@ -1,7 +1,7 @@
 import logging
 import secrets
 from datetime import datetime, timedelta
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 
@@ -12,19 +12,18 @@ from app.core.config import settings
 from app.core.security import create_access_token, create_refresh_token, verify_password, hash_password
 from app.db.session import get_db
 from app.models.user import UserRole
-from app.schemas.user import ForgotPasswordRequest, GoogleTokenPayload, ResetPasswordRequest, TokenRefreshRequest, UserCreate, UserResponse, VerifyOTPRequest
+from app.schemas.user import ForgotPasswordRequest, GoogleTokenPayload, ResendOTPRequest, ResetPasswordRequest, TokenRefreshRequest, UserCreate, UserResponse, VerifyOTPRequest
 from app.services.user_service import UserService           
-from app.services.user_service import UserService          
-from app.services.organization import OrganizationService 
 from app.services.mail_service import mail_service  
 from app.core.cache import otp_cache  
+
 
 router = APIRouter()
 logger = logging.getLogger(__name__) 
 
 
 @router.post("/login")
-async def login(username: str, password: str, db: Session = Depends(get_db)):
+async def login(username: str, password: str, response: Response, db: Session = Depends(get_db)):
     user = UserService.get_user_by_login(db, username)
     if not user or not verify_password(password, user.hashed_password):
         raise HTTPException(
@@ -34,21 +33,29 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
 
     token_data = {
         "sub": str(user.id),
-        "role": user.role.value,
-        "username": user.username,
-        "email": user.email,
+        "role": user.role,
+        "username": user.username
     }
+    access_token = create_access_token(data=token_data)
+    
+    # Set the secure token as an HttpOnly Cookie
+    response.set_cookie(
+        key="auth_token",
+        value=access_token,
+        httponly=True,       # Prevents JavaScript reading the token (Stops Postman exfiltration)
+        secure=True,         # Ensures cookie is only sent over HTTPS connections
+        samesite="lax",      # Guards against Cross-Site Request Forgery (CSRF)
+        max_age=3600,        # Match access token duration (e.g., 1 hour)
+        path="/"
+    )
 
     return {
-        "access_token": create_access_token(token_data),
-        "refresh_token": create_refresh_token({"sub": str(user.id)}),
-        "token_type": "bearer",
-        "role": user.role,
-        "username": user.username,
-        "email": user.email,
-        "id": user.id,
-        "is_active": user.is_active,
-        "created_at": user.created_at,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": user.role
+        }
     }
 
  
@@ -85,7 +92,7 @@ async def refresh_token(payload: TokenRefreshRequest, db: Session = Depends(get_
         # Re-mint access token using existing structural payload logic
         new_access_token = create_access_token({
             "sub": str(user.id),
-            "role": user.role.value,
+            "role": user.role,
             "username": user.username,
             "email": user.email,
         })
@@ -137,8 +144,8 @@ async def auth_google(payload: GoogleTokenPayload, db: Session = Depends(get_db)
                 first_name=name.split(' ')[0] if name else None,
                 last_name=name.split(' ', 1)[1] if name and ' ' in name else None,
                 password=secrets.token_urlsafe(16), 
-                role=UserRole.USER,              
-                organization=None
+                role="user"
+                
             )
             
             user = UserService.create_user(db, new_user_data)
@@ -146,7 +153,7 @@ async def auth_google(payload: GoogleTokenPayload, db: Session = Depends(get_db)
 
         token_data = {
             "sub": str(user.id),
-            "role": user.role.value,
+            "role": user.role,
             "username": user.username,
             "email": user.email,
         }
@@ -170,10 +177,8 @@ async def auth_google(payload: GoogleTokenPayload, db: Session = Depends(get_db)
         )
 
 
-
 @router.post("/register", response_model=UserResponse)
 async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    
     if UserService.get_user_by_email(db, user_data.email):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -186,24 +191,12 @@ async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db:
             detail="Username already taken",
         )
 
-    if (
-        user_data.role == UserRole.HOST
-        and user_data.organization is not None
-        and OrganizationService.get_by_subdomain(db, user_data.organization.subdomain)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Organization subdomain already taken",
-        )
-
-    if user_data.role == UserRole.HOST:
-        new_user = OrganizationService.create_host_with_organization(db, user_data)
-        org_name = user_data.organization.name if user_data.organization else "Your Organization"
-    else:
-        new_user = UserService.create_user(db, user_data)
-        org_name = "GreenLight"
-
+    new_user = UserService.create_user(db, user_data)
+    
     user_display_name = user_data.first_name or new_user.username
+    org_name = "GreenLight"  
+
+    # 3. Schedule welcome communication
     background_tasks.add_task(
         mail_service.send_welcome_email,
         email=new_user.email,
@@ -211,13 +204,9 @@ async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db:
         org_name=org_name
     )
     
-    new_user = UserService.create_user(db, user_data)
-    
-    # send email confirmation OTP
     otp_code = f"{secrets.randbelow(900000) + 100000}"
     expire = datetime.utcnow() + timedelta(minutes=15)
         
-    
     otp_cache.set_otp(email=new_user.email, otp=otp_code, expires_at=expire)
     background_tasks.add_task(
         mail_service.send_email_confirmation,
@@ -228,7 +217,28 @@ async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db:
     
     return new_user
 
+# function to resend the otp afer countdown
+@router.post("/resend-otp")
+async def resend_otp(payload: ResendOTPRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Resend a new verification code to the user's email."""
+    user = UserService.get_user_by_email(db, payload.email)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
+    otp_code = f"{secrets.randbelow(900000) + 100000}"
+    expire = datetime.utcnow() + timedelta(minutes=15)
+
+    otp_cache.set_otp(email=user.email, otp=otp_code, expires_at=expire)
+    background_tasks.add_task(
+        mail_service.send_email_confirmation,
+        email=user.email,
+        name=getattr(user, 'first_name', user.username) or "User",
+        otp=otp_code
+    )
+
+    return {"detail": "New verification code sent."}
+
+ 
 @router.post("/forgot-password")
 async def forgot_password(payload: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Check email existence and generate a cryptographically signed recovery token."""
@@ -314,3 +324,13 @@ async def reset_password(payload: ResetPasswordRequest, db: Session = Depends(ge
             status_code=status.HTTP_400_BAD_REQUEST, 
             detail="The active authorization context signature link has expired."
         )
+        
+        
+@router.post("/auth/logout")
+async def logout(response: Response):
+    response.delete_cookie(
+        key="auth_token",
+        path="/",
+        domain=None  
+    )
+    return {"detail": "Successfully logged out and session context revoked."}
