@@ -11,7 +11,7 @@ class OrganizationBase(BaseModel):
 
 
 class OrganizationCreate(OrganizationBase):
-    owner_id: int
+    owner_id: Optional[int] = None
 
 
 class OrganizationUpdate(BaseModel):

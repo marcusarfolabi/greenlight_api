@@ -25,6 +25,7 @@ class OrganizationService:
             db_org = Organization(
                 name=org_data.name,
                 subdomain=org_data.subdomain,
+                industry=org_data.industry,
                 owner_id=user_id,          
             )
             

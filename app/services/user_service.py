@@ -69,6 +69,13 @@ class UserService:
         db.delete(db_user)
         db.commit()
         return db_user
+    
+    @staticmethod
+    def user_has_org(db: Session, user_id: int) -> bool:
+        user = UserService.get_user(db, user_id)
+        if user is None:
+            return False
+        return user.owned_organization is not None
      
  
 user_service = UserService()

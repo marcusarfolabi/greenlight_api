@@ -51,15 +51,19 @@ async def login(
         max_age=3600,
         path="/"
     )
-
+    # return along if user has org data... true or false
+    hasOrg = UserService.user_has_org(db, user.id)
     return {
         "user": {
             "id": user.id,
             "username": user.username,
             "email": user.email,
-            "role": user.role
+            "role": user.role,
+            "hasOrg": hasOrg
         }
     }
+
+
 @router.post("/refresh")
 async def refresh_token(payload: TokenRefreshRequest, db: Session = Depends(get_db)):
     """Exchange a valid, unexpired refresh token for a brand new access token."""

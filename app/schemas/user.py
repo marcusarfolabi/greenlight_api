@@ -6,6 +6,12 @@ from pydantic import BaseModel, ConfigDict, EmailStr, model_validator
 from app.models.user import UserRole
 from app.schemas.organization import OrganizationCreate, OrganizationResponse
 
+class AuthContext(BaseModel):
+    token: str
+    user_id: int
+    role: str
+    username: str
+    
 class ResendOTPRequest(BaseModel):
     email: EmailStr
 

@@ -1,13 +1,14 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer
 from fastapi.security.http import HTTPAuthorizationCredentials as HTTPAuthCredentials
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 
 from app.core.config import settings
+from app.schemas.user import AuthContext
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 security = HTTPBearer()
@@ -31,9 +32,11 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def decode_token(token: str) -> dict:
-    try:
+    try: 
+        print(f"DEBUG: Using secret key: {settings.JWT_SECRET_KEY[:5]}...") 
         return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
     except JWTError as exc:
+        print(f"DEBUG: JWT Decode Error: {exc}")  
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials or token has expired",
@@ -54,17 +57,21 @@ def create_password_reset_token(user_id: int) -> str:
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     
     
-async def get_current_user(credentials: HTTPAuthCredentials = Depends(security)) -> dict:
-    """
-    FastAPI Dependency injection provider to guard protected API routes.
-    Automatically parses incoming request authorization headers.
-    """
-    token = credentials.credentials
+async def get_current_user(request: Request) -> AuthContext:
+    token = request.cookies.get("auth_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
     payload = decode_token(token)
-    sub_value = payload.get("sub")
-    if sub_value is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token payload is missing subject identity data context.",
-        )
-    return payload
+    user_id = payload.get("sub")
+    
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    # Return the structured model
+    return AuthContext(
+        token=token,
+        user_id=int(user_id),
+        role=payload.get("role", "user"),
+        username=payload.get("username", "")
+    )
