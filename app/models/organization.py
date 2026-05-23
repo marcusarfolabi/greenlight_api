@@ -7,8 +7,7 @@ from app.models.wallet import Wallet
 from .base import Base
 
 if TYPE_CHECKING:
-    from .user import User
-    from .quiz import Quiz
+    from .user import User 
 
 class Organization(Base):
     __tablename__ = "organizations"
@@ -23,8 +22,7 @@ class Organization(Base):
     
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     owner: Mapped["User"] = relationship(back_populates="owned_organization")
-   
-    quizzes: Mapped[List["Quiz"]] = relationship(back_populates="organization")
+    
     
     # One-to-one link to their financial wallet
     wallet: Mapped["Wallet"] = relationship(back_populates="organization", uselist=False)

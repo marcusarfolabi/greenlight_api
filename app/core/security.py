@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import APIKeyCookie
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer
-from fastapi.security.http import HTTPAuthorizationCredentials as HTTPAuthCredentials
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 
@@ -13,6 +13,11 @@ from app.schemas.user import AuthContext
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 security = HTTPBearer()
 
+
+cookie_scheme = APIKeyCookie(
+name="auth_token",
+auto_error=False
+)
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
@@ -33,10 +38,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 def decode_token(token: str) -> dict:
     try: 
-        print(f"DEBUG: Using secret key: {settings.JWT_SECRET_KEY[:5]}...") 
         return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
     except JWTError as exc:
-        print(f"DEBUG: JWT Decode Error: {exc}")  
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials or token has expired",
@@ -56,19 +59,47 @@ def create_password_reset_token(user_id: int) -> str:
     to_encode = {"sub": str(user_id), "exp": expire, "action": "password_reset"}
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     
-    
-async def get_current_user(request: Request) -> AuthContext:
-    token = request.cookies.get("auth_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    payload = decode_token(token)
-    user_id = payload.get("sub")
-    
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
 
-    # Return the structured model
+
+# async def get_current_user(request: Request) -> AuthContext:
+#     token = request.cookies.get("auth_token")
+#     if not token:
+#         raise HTTPException(status_code=401, detail="Not authenticated")
+    
+#     payload = decode_token(token)
+#     user_id = payload.get("sub")
+    
+#     if user_id is None:
+#         raise HTTPException(status_code=401, detail="Invalid token payload")
+
+#     # Return the structured model
+#     return AuthContext(
+#         token=token,
+#         user_id=int(user_id),
+#         role=payload.get("role", "user"),
+#         username=payload.get("username", "")
+#     )
+
+async def get_current_user(
+    token: str = Depends(cookie_scheme)
+) -> AuthContext:
+
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated"
+        )
+
+    payload = decode_token(token)
+
+    user_id = payload.get("sub")
+
+    if user_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token payload"
+        )
+
     return AuthContext(
         token=token,
         user_id=int(user_id),

@@ -53,7 +53,7 @@ async def login(
     )
     # return along if user has org data... true or false
     hasOrg = UserService.user_has_org(db, user.id)
-    return {
+    response_data = {
         "user": {
             "id": user.id,
             "username": user.username,
@@ -62,6 +62,12 @@ async def login(
             "hasOrg": hasOrg
         }
     }
+    
+    if hasOrg:
+        subdomain = UserService.user_sub_domain(db, user.id)
+        response_data["user"]["subdomain"] = subdomain
+    
+    return response_data
 
 
 @router.post("/refresh")
@@ -274,7 +280,7 @@ async def verify_otp(payload: VerifyOTPRequest, db: Session = Depends(get_db)):
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The verification code entered is incorrect, invalid, or has expired."
+            detail="The verification code is incorrect or has expired."
         )
         
     user = UserService.get_user_by_email(db, payload.email)
@@ -329,7 +335,7 @@ async def reset_password(payload: ResetPasswordRequest, db: Session = Depends(ge
         )
         
         
-@router.post("/auth/logout")
+@router.post("/logout")
 async def logout(response: Response):
     response.delete_cookie(
         key="auth_token",

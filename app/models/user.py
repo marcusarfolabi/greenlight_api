@@ -8,8 +8,7 @@ from app.models.wallet import Wallet
 from .base import Base
 
 if TYPE_CHECKING:
-    from .organization import Organization
-    from .session import Participant, QuizSession
+    from .organization import Organization 
 
 class UserRole(enum.Enum):
     USER = "user"
@@ -32,9 +31,7 @@ class User(Base):
     
     
     # Relationships
-    owned_organization: Mapped[Optional["Organization"]] = relationship(back_populates="owner", uselist=False)
-    participations: Mapped[List["Participant"]] = relationship(back_populates="user")
-    hosted_sessions: Mapped[List["QuizSession"]] = relationship(back_populates="host")
+    owned_organization: Mapped[Optional["Organization"]] = relationship(back_populates="owner", uselist=False) 
     payout_profile: Mapped[Optional["PayoutProfile"]] = relationship(back_populates="user", uselist=False)
     wallet: Mapped[Optional["Wallet"]] = relationship(back_populates="user", uselist=False)
 

@@ -1,4 +1,3 @@
-import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
 from pydantic import field_validator
@@ -27,18 +26,13 @@ class Settings(BaseSettings):
     ADMIN_USERNAME: str = ""
     ADMIN_PASSWORD: str = ""
     ADMIN_HASHED_PASSWORD: str = ""
+    
+    POSTGRES_USER: str = ""
+    POSTGRES_PASSWORD: str = ""
+    POSTGRES_DB: str = "" 
+    DB_PORT: str = ""
+    DB_HOST: str = ""
 
-    # Let Pydantic handle validation naturally from fields or the env file
-    DATABASE_URL: str = ""
-
-    @field_validator("DATABASE_URL", mode="before")
-    @classmethod
-    def fix_postgres_protocol(cls, v: Optional[str]) -> Optional[str]:
-        if v and v.startswith("postgres://"):
-            return v.replace("postgres://", "postgresql://", 1)
-        return v
- 
-    # Force Pydantic to read our .env.docker file automatically!
     model_config = SettingsConfigDict(
         env_file=".env.docker", 
         env_file_encoding="utf-8",

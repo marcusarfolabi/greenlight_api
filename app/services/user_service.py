@@ -76,6 +76,13 @@ class UserService:
         if user is None:
             return False
         return user.owned_organization is not None
+    
+    @staticmethod
+    def user_sub_domain(db: Session, user_id: int) -> Optional[str]:
+        user = UserService.get_user(db, user_id)
+        if user is None or user.owned_organization is None:
+            return None
+        return user.owned_organization.subdomain
      
  
 user_service = UserService()
