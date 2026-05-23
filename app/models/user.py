@@ -26,7 +26,8 @@ class User(Base):
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
     
     role: Mapped[str] = mapped_column(String(50), default="user")    
-    is_active: Mapped[bool] = mapped_column(default=True)
+    is_active: Mapped[bool] = mapped_column(default=False)
+    email_verified_at: Mapped[datetime] = mapped_column(insert_default=func.now())
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
     
     

@@ -187,25 +187,24 @@ async def auth_google(payload: GoogleTokenPayload, db: Session = Depends(get_db)
             detail="Invalid Google OAuth token signature or token expired"
         )
 
-
 @router.post("/register", response_model=UserResponse)
 async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     if UserService.get_user_by_email(db, user_data.email):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered",
+            detail="Email already registered!",
         )
 
     if UserService.get_user_by_username(db, user_data.username):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already taken",
-        )
-
+        ) 
+        
     new_user = UserService.create_user(db, user_data)
     
     user_display_name = user_data.first_name or new_user.username
-    org_name = "GreenLight"  
+    org_name = ""  
 
     # 3. Schedule welcome communication
     background_tasks.add_task(
@@ -228,7 +227,6 @@ async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db:
     
     return new_user
 
-# function to resend the otp afer countdown
 @router.post("/resend-otp")
 async def resend_otp(payload: ResendOTPRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Resend a new verification code to the user's email."""
@@ -273,8 +271,7 @@ async def forgot_password(payload: ForgotPasswordRequest, background_tasks: Back
 
 @router.post("/verify-otp")
 async def verify_otp(payload: VerifyOTPRequest, db: Session = Depends(get_db)):
-    """Checks cache validation accuracy. Destroys entry on match and returns a transient payload modifier token."""
-    print(f"Received OTP verification request for email: {payload.email} with OTP: {payload.otp}")
+    """Checks cache validation accuracy. Destroys entry on match and returns a transient payload modifier token.""" 
     is_valid = otp_cache.verify_and_destroy_otp(email=payload.email, incoming_otp=payload.otp)
     
     if not is_valid:

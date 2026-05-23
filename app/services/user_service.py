@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import enum
 from typing import Optional
 
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 
@@ -23,7 +24,7 @@ class UserService:
     @staticmethod
     def get_user_by_email(db: Session, email: str) -> Optional[User]:
         return db.query(User).filter(User.email == email).first()
-
+    
     @staticmethod
     def get_user_by_login(db: Session, login: str) -> Optional[User]:
         return (
