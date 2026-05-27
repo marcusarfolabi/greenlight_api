@@ -13,29 +13,31 @@ load_dotenv(dotenv_path=".env.docker")
 from app.api import api_router
 from app.db.session import engine
 from app.models import Base
-from app.models.user import User
-from app.models.organization import Organization
-from app.models.arena import Arena, Question, QuestionOption
-from app.models.wallet import Wallet, Transaction
 from app.core.config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-_registered_models = [User, Organization, Arena, Question, QuestionOption, Wallet, Transaction]
-
-print(f"DEBUG: Registering {len(_registered_models)} models with metadata...")
 
 Base.metadata.create_all(bind=engine)
 
 security = HTTPBasic()
  
 def get_admin_user(credentials: HTTPBasicCredentials = Depends(security)):
-    correct_username = "admin_prod" 
-    correct_password = os.getenv("ADMIN_PASS")
+    correct_username = os.getenv("API_ADMIN_USERNAME")
+    correct_password = os.getenv("API_ADMIN_PASSWORD")
     
     if not correct_password:
-        logger.error("❌ CRITICAL: ADMIN_PASS environment variable is NOT SET")
+        logger.error("❌ CRITICAL: API_ADMIN_PASSWORD environment variable is NOT SET")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
+    if not correct_username:
+        logger.error("❌ CRITICAL: API_ADMIN_USERNAME environment variable is NOT SET")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
     
     if credentials.username != correct_username or credentials.password != correct_password:
         raise HTTPException(
@@ -88,6 +90,7 @@ async def get_open_api_endpoint(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
+    allow_origin_regex=r"https?://([a-z0-9-]+\.)?localhost:3000",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

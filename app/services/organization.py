@@ -2,8 +2,12 @@ import logging
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
+from sqlalchemy.orm import joinedload
+
 from app.models.organization import Organization
-from app.schemas.organization import OrganizationCreate
+from app.models.wallet import Wallet
+from app.schemas.organization import OrganizationCreate, OrgSettingsResponse
+from app.services.stripe_connect import StripeConnectService
 
 
 logger = logging.getLogger(__name__)
@@ -14,6 +18,17 @@ class OrganizationService:
     @staticmethod
     def get_by_subdomain(db: Session, subdomain: str) -> Organization | None:
         return db.query(Organization).filter(Organization.subdomain == subdomain).first()
+
+    @staticmethod
+    def get_by_owner(db: Session, owner_id: int) -> Organization | None:
+        """Get organization by owner user ID"""
+        return db.query(Organization).filter(Organization.owner_id == owner_id).first()
+
+    @staticmethod
+    def build_settings_response(org: Organization) -> OrgSettingsResponse:
+        return OrgSettingsResponse.model_validate(org).model_copy(
+            update={"stripe_connect": StripeConnectService.connect_status(org)},
+        )
 
     
     @staticmethod
@@ -30,6 +45,9 @@ class OrganizationService:
             )
             
             db.add(db_org)
+            db.flush()
+
+            db.add(Wallet(organization_id=db_org.id, balance=0, currency="usd"))
             db.commit()
             db.refresh(db_org)
             
@@ -43,5 +61,65 @@ class OrganizationService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="An error occurred while creating your workspace setup."
             )
+
+    @staticmethod
+    def get_or_create_wallet(db: Session, organization_id: int) -> Wallet:
+        wallet = (
+            db.query(Wallet)
+            .options(joinedload(Wallet.transactions))
+            .filter(Wallet.organization_id == organization_id)
+            .first()
+        )
+        if wallet:
+            return wallet
+
+        wallet = Wallet(organization_id=organization_id, balance=0, currency="usd")
+        db.add(wallet)
+        db.commit()
+        db.refresh(wallet)
+        return wallet
+
+    @staticmethod
+    def get_wallet_summary(db: Session, org: Organization) -> dict:
+        wallet = OrganizationService.get_or_create_wallet(db, org.id)
+
+        total_spent = sum(
+            abs(transaction.amount)
+            for transaction in wallet.transactions
+            if transaction.amount < 0 and transaction.status == "completed"
+        )
+        pending_withheld = sum(
+            abs(transaction.amount)
+            for transaction in wallet.transactions
+            if transaction.status == "pending"
+        )
+
+        transactions = sorted(
+            wallet.transactions,
+            key=lambda transaction: transaction.created_at,
+            reverse=True,
+        )[:20]
+
+        return {
+            "balance": wallet.balance,
+            "total_spent": total_spent,
+            "pending_withheld": pending_withheld,
+            "currency": wallet.currency,
+            "stripe_connect_id": org.stripe_connect_id,
+            "transactions": [
+                {
+                    "id": transaction.id,
+                    "amount": transaction.amount,
+                    "type": transaction.type.value
+                    if hasattr(transaction.type, "value")
+                    else str(transaction.type),
+                    "description": transaction.description,
+                    "status": transaction.status,
+                    "stripe_reference": transaction.stripe_reference,
+                    "created_at": transaction.created_at,
+                }
+                for transaction in transactions
+            ],
+        }
  
 organization_service = OrganizationService()

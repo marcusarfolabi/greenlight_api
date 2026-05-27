@@ -1,20 +1,12 @@
-import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
 from app.models import Base
+from app.core.config import settings
 
-load_dotenv()
+db_host = settings.DB_HOST if settings.DB_HOST else "127.0.0.1"
+db_port = settings.DB_PORT if settings.DB_PORT else "5432"
 
-user = os.getenv("POSTGRES_USER")
-password = os.getenv("POSTGRES_PASSWORD")
-host = os.getenv("DB_HOST")
-port = os.getenv("DB_PORT")
-db_name = os.getenv("POSTGRES_DB")
-
-db_host = host if host else "127.0.0.1"
-
-DATABASE_URL = f"postgresql://{user}:{password}@{db_host}:{port}/{db_name}"
+DATABASE_URL = f"postgresql://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@{db_host}:{db_port}/{settings.POSTGRES_DB}"
 
 engine = create_engine(
     DATABASE_URL, 

@@ -14,6 +14,7 @@ class TransactionType(enum.Enum):
     PRIZE_PAYOUT = "payout" # Money leaving to a winner
     REFUND = "refund"       # Canceled game refund
     PLATFORM_FEE = "fee"    # Your cut of the game
+    SUBSCRIPTION = "subscription"    # Your cut of the game
 
 class Wallet(Base):
     __tablename__ = "wallets"

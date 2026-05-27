@@ -17,12 +17,14 @@ class Settings(BaseSettings):
     
     GOOGLE_CLIENT_ID: str = ""   
     GOOGLE_CLIENT_SECRET: Optional[str] = None
+    ENVIRONMENT: str = "localhost"
     
     CORS_ORIGINS: List[str] = ["*"]
     RESEND_API_KEY: str = ""
     RESEND_FROM_EMAIL: str = "hello@falconmail.online"
-    APP_NAME: str = "Green Light Quiz" 
-    
+
+    APP_NAME: str = "Green Light Quiz"  
+
     ADMIN_USERNAME: str = ""
     ADMIN_PASSWORD: str = ""
     ADMIN_HASHED_PASSWORD: str = ""
@@ -33,8 +35,13 @@ class Settings(BaseSettings):
     DB_PORT: str = ""
     DB_HOST: str = ""
 
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_CONNECT_RETURN_URL: str = "http://localhost:3000/dashboard/settings/payouts?stripe=return"
+    STRIPE_CONNECT_REFRESH_URL: str = "http://localhost:3000/dashboard/settings/payouts?stripe=refresh"
+
     model_config = SettingsConfigDict(
-        env_file=".env.docker", 
+        env_file=(".env", ".env.docker"),
         env_file_encoding="utf-8",
         extra="ignore"
     )

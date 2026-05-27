@@ -1,6 +1,5 @@
 fastapi[all]
 sqlalchemy
-alembic
 psycopg2-binary
 python-jose[cryptography]
 passlib[bcrypt]
@@ -9,4 +8,5 @@ pydantic-settings
 pyjwt
 fastapi-mail
 google-auth
-requests 
+requests
+stripe

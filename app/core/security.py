@@ -12,7 +12,7 @@ from app.schemas.user import AuthContext
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 security = HTTPBearer()
-
+from fastapi import Request # Add this import
 
 cookie_scheme = APIKeyCookie(
 name="auth_token",
@@ -80,13 +80,15 @@ def create_password_reset_token(user_id: int) -> str:
 #         username=payload.get("username", "")
 #     )
 
-async def get_current_user(
-    token: str = Depends(cookie_scheme)
-) -> AuthContext:
+async def get_current_user(request: Request) -> AuthContext:
 
+    token = request.cookies.get("auth_token")
+    
     if not token:
+        # Debugging: log what cookies ARE present
+        print(f"DEBUG: Cookies received: {request.cookies}")
         raise HTTPException(
-            status_code=401,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated"
         )
 

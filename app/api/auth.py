@@ -43,15 +43,15 @@ async def login(
     access_token = create_access_token(data=token_data)
     
     response.set_cookie(
-        key="auth_token",
-        value=access_token,
-        httponly=True,
-        secure=False,  # Set to True only if using HTTPS in production
-        samesite="lax",
-        max_age=3600,
-        path="/"
-    )
-    # return along if user has org data... true or false
+    key="auth_token",
+    value=access_token,
+    httponly=True,
+    secure=False, 
+    samesite="lax",        
+    domain="localhost",     
+    max_age=3600,
+    path="/"
+)
     hasOrg = UserService.user_has_org(db, user.id)
     response_data = {
         "user": {

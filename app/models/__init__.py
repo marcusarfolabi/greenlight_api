@@ -3,6 +3,7 @@ from .user import User, UserRole, PayoutProfile
 from .organization import Organization
 from .arena import Arena, Question, QuestionOption
 from .wallet import Wallet, Transaction, TransactionType
+from .subscription import SubscriptionPlan, SubscriptionPlanType, Subscription
 
 # This list helps with 'from app.models import *'
 __all__ = [
@@ -16,5 +17,8 @@ __all__ = [
     "QuestionOption",
     "Wallet",
     "Transaction",
-    "TransactionType"
+    "TransactionType",
+    "SubscriptionPlan",
+    "SubscriptionPlanType",
+    "Subscription"
 ]
