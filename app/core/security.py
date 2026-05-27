@@ -105,6 +105,7 @@ async def get_current_user(request: Request) -> AuthContext:
     return AuthContext(
         token=token,
         user_id=int(user_id),
+        org_id=int(org_id),
         role=payload.get("role", "user"),
         username=payload.get("username", "")
     )

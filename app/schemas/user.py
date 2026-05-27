@@ -9,6 +9,7 @@ from app.schemas.organization import OrganizationCreate, OrganizationResponse
 class AuthContext(BaseModel):
     token: str
     user_id: int
+    org_id: int
     role: str
     username: str
     

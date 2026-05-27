@@ -134,7 +134,7 @@ def seed_subscription_plans():
                     stripe_price_id = price.id
                     print(f"      ✅ Price created: {stripe_price_id}")
 
-                except stripe.error.StripeError as e:
+                except Exception as e:
                     print(f"   ❌ Stripe error: {str(e)}")
                     session.rollback()
                     sys.exit(1)

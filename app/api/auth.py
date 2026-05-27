@@ -59,7 +59,8 @@ async def login(
             "username": user.username,
             "email": user.email,
             "role": user.role,
-            "hasOrg": hasOrg
+            "hasOrg": hasOrg,
+            "organization_id": UserService.get_user_org_id(db, user.id) if hasOrg else None
         }
     }
     
