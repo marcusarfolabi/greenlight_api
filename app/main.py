@@ -8,7 +8,7 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 
 
-load_dotenv(dotenv_path=".env.docker") 
+load_dotenv(dotenv_path=".env.docker")
 
 from app.api import api_router
 from app.db.session import engine
@@ -16,6 +16,7 @@ from app.models import Base
 from app.core.config import settings
 
 logging.basicConfig(level=logging.INFO)
+
 logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)

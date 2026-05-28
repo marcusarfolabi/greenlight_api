@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta
 from typing import Optional
 from pydantic import BaseModel
 
@@ -11,23 +12,17 @@ from app.core.config import settings
 from app.models.subscription import SubscriptionPlan, Subscription
 from app.models.organization import Organization
 from app.schemas.subscription import (
+    ConfirmPaymentRequest,
+    CreatePaymentIntentRequest,
     SubscriptionPlanResponse,
     SubscriptionResponse,
     SubscriptionCreate,
 )
-from backend.app.core.security import get_current_user
-from backend.app.schemas.user import AuthContext
+from app.core.security import get_current_user
+from app.schemas.user import AuthContext
 
 
-class CreatePaymentIntentRequest(BaseModel):
-    organization_id: int
-    plan_id: int
 
-
-class ConfirmPaymentRequest(BaseModel):
-    organization_id: int
-    plan_id: int
-    payment_intent_id: str
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -59,15 +54,14 @@ async def get_plan(plan_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/organization", response_model=SubscriptionResponse)
-async def get_organization_subscription(
-    organization_id: int,
+async def get_organization_subscription( 
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     
 ):
     """Get the current subscription for an organization"""
     subscription = db.query(Subscription).filter(
-        Subscription.organization_id == organization_id,
+        Subscription.organization_id == auth.org_id,
         Subscription.status == "active"
     ).first()
     
@@ -80,10 +74,11 @@ async def get_organization_subscription(
     return subscription
 
 
-@router.post("/", response_model=SubscriptionResponse)
+@router.post("", response_model=SubscriptionResponse)
 async def create_subscription(
     subscription_data: SubscriptionCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user)
 ):
     """Create a new subscription for an organization"""
     
@@ -100,21 +95,38 @@ async def create_subscription(
     
     # Cancel any existing active subscriptions
     existing = db.query(Subscription).filter(
-        Subscription.organization_id == subscription_data.organization_id,
+        Subscription.organization_id == auth.org_id,
         Subscription.status == "active"
     ).first()
     
+    period_start = datetime.utcnow()
+
+    if plan.interval == "year":
+        period_end = period_start + timedelta(days=365)
+    else:
+        period_end = period_start + timedelta(days=30)
+
+    # 2. Handle existing subscription
+    existing = db.query(Subscription).filter(
+        Subscription.organization_id == auth.org_id,
+        Subscription.status == "active"
+    ).first()
+
     if existing:
         existing.status = "canceled"
-    
-    # Create new subscription
+        existing.canceled_at = period_start # Use the same timestamp
+
+    # 3. Create the new subscription object reliably
     subscription = Subscription(
-        organization_id=subscription_data.organization_id,
+        organization_id=auth.org_id,
         plan_id=subscription_data.plan_id,
         stripe_subscription_id=subscription_data.stripe_subscription_id,
         stripe_customer_id=subscription_data.stripe_customer_id,
-        status=subscription_data.status
-    )
+        status=subscription_data.status,
+        current_period_start=period_start,
+        current_period_end=period_end,
+    ) 
+        
     
     db.add(subscription)
     db.commit()
@@ -126,7 +138,8 @@ async def create_subscription(
 @router.post("/payment-intent")
 async def create_payment_intent(
     request: CreatePaymentIntentRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user)
 ):
     """Create a Stripe Payment Intent for embedded payment element"""
     
@@ -151,7 +164,7 @@ async def create_payment_intent(
     
     # Verify organization exists
     organization = db.query(Organization).filter(
-        Organization.id == request.organization_id
+        Organization.id == auth.org_id
     ).first()
     
     if not organization:
@@ -171,7 +184,7 @@ async def create_payment_intent(
     try:
         # Check if organization already has a Stripe customer
         existing_subscription = db.query(Subscription).filter(
-            Subscription.organization_id == request.organization_id
+            Subscription.organization_id == auth.org_id
         ).first()
         
         if existing_subscription and existing_subscription.stripe_customer_id:
@@ -181,7 +194,7 @@ async def create_payment_intent(
             customer = stripe.Customer.create(
                 name=organization.name,
                 metadata={
-                    "organization_id": request.organization_id,
+                    "organization_id": str(auth.org_id),
                 }
             )
             stripe_customer_id = customer.id
@@ -196,8 +209,8 @@ async def create_payment_intent(
             customer=stripe_customer_id,
             automatic_payment_methods={"enabled": True},
             metadata={
-                "organization_id": request.organization_id,
-                "plan_id": request.plan_id,
+                "organization_id": str(auth.org_id),
+                "plan_id": str(request.plan_id),
             },
         )
         
@@ -217,7 +230,8 @@ async def create_payment_intent(
 @router.post("/confirm-payment")
 async def confirm_payment(
     request: ConfirmPaymentRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user)
 ):
     """Confirm payment and create subscription after successful payment"""
     
@@ -234,7 +248,7 @@ async def confirm_payment(
     
     # Verify organization exists
     organization = db.query(Organization).filter(
-        Organization.id == request.organization_id
+        Organization.id == auth.org_id
     ).first()
     
     if not organization:
@@ -252,34 +266,39 @@ async def confirm_payment(
     stripe.api_key = settings.STRIPE_SECRET_KEY
     
     try:
-        # Retrieve and verify payment intent
         payment_intent = stripe.PaymentIntent.retrieve(request.payment_intent_id)
-        
-        # Check payment status
+
         if payment_intent.status != "succeeded":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Payment not completed. Status: {payment_intent.status}"
             )
         
-        # Get Stripe customer ID from payment intent
         stripe_customer_id = payment_intent.customer
         
-        # Cancel any existing active subscriptions
         existing = db.query(Subscription).filter(
-            Subscription.organization_id == request.organization_id,
+            Subscription.organization_id == auth.org_id,
             Subscription.status == "active"
         ).first()
         
         if existing:
             existing.status = "canceled"
+            existing.canceled_at = datetime.utcnow()
+        
+        period_start = datetime.utcnow()
+        if plan.interval == "year":
+            period_end = period_start + timedelta(days=365)
+        else:  # Default to month
+            period_end = period_start + timedelta(days=30)
         
         # Create subscription in database
         subscription = Subscription(
-            organization_id=request.organization_id,
+            organization_id=auth.org_id,
             plan_id=request.plan_id,
             stripe_customer_id=stripe_customer_id,
             stripe_subscription_id=payment_intent.id,
+            current_period_start=period_start,
+            current_period_end=period_end,
             status="active"
         )
         
@@ -287,7 +306,7 @@ async def confirm_payment(
         db.commit()
         db.refresh(subscription)
         
-        logger.info(f"Subscription created for org {request.organization_id} on plan {request.plan_id}")
+        logger.info(f"Subscription created for org {auth.org_id} on plan {request.plan_id}")
         
         return {
             "success": True,

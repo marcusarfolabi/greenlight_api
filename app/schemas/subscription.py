@@ -3,7 +3,15 @@ from typing import Optional
 from datetime import datetime
 from enum import Enum
 
+class CreatePaymentIntentRequest(BaseModel):
+    organization_id: int
+    plan_id: int
 
+
+class ConfirmPaymentRequest(BaseModel):
+    organization_id: int
+    plan_id: int
+    payment_intent_id: str
 class SubscriptionPlanTypeSchema(str, Enum):
     FREE = "free"
     STANDARD = "standard"

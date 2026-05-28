@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 
 @router.post("/login")
 async def login(
+    response: Response,
     username: str = Form(...),   
     password: str = Form(...),   
-    response: Response = Response(),  
     db: Session = Depends(get_db)
 ):
     user = UserService.get_user_by_login(db, username)
@@ -35,24 +35,27 @@ async def login(
             detail="Invalid username/email or password",
         )
 
+    hasOrg = UserService.user_has_org(db, user.id)
+    org_id = UserService.get_user_org_id(db, user.id) if hasOrg else None
+    
     token_data = {
         "sub": str(user.id),
         "role": user.role,
-        "username": user.username
+        "username": user.username,
+        "org_id": org_id
     }
     access_token = create_access_token(data=token_data)
     
     response.set_cookie(
-    key="auth_token",
-    value=access_token,
-    httponly=True,
-    secure=False, 
-    samesite="lax",        
-    domain="localhost",     
-    max_age=3600,
-    path="/"
-)
-    hasOrg = UserService.user_has_org(db, user.id)
+        key="auth_token",
+        value=access_token,
+        httponly=True,
+        secure=False, 
+        samesite="lax",        
+        domain="localhost",     
+        max_age=3600,
+        path="/"
+    )
     response_data = {
         "user": {
             "id": user.id,
@@ -68,6 +71,7 @@ async def login(
         subdomain = UserService.user_sub_domain(db, user.id)
         response_data["user"]["subdomain"] = subdomain
     
+    response.status_code = 200
     return response_data
 
 

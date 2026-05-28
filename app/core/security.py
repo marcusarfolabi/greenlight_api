@@ -102,10 +102,12 @@ async def get_current_user(request: Request) -> AuthContext:
             detail="Invalid token payload"
         )
 
+    org_id = payload.get("org_id")
+    
     return AuthContext(
         token=token,
         user_id=int(user_id),
-        org_id=int(org_id),
+        org_id=int(org_id) if org_id else 0,
         role=payload.get("role", "user"),
         username=payload.get("username", "")
     )
