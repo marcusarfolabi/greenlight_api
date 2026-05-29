@@ -34,11 +34,15 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "" 
     DB_PORT: str = ""
     DB_HOST: str = ""
+    
+    DATABASE_URL: str = ""
 
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_CONNECT_RETURN_URL: str = "http://localhost:3000/dashboard/settings/payouts?stripe=return"
     STRIPE_CONNECT_REFRESH_URL: str = "http://localhost:3000/dashboard/settings/payouts?stripe=refresh"
+    
+    GEMINI_API_KEY: str = ""
 
     model_config = SettingsConfigDict(
         env_file=(".env", ".env.docker"),

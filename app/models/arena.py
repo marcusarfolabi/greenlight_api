@@ -36,6 +36,7 @@ class Question(Base):
     time_limit_seconds: Mapped[int] = mapped_column(default=10)
     point_value: Mapped[int] = mapped_column(default=10)
     correct_option_index: Mapped[int] = mapped_column()
+    status: Mapped[str] = mapped_column(String(10), default="draft")  # active, draft, deleted
     
     # AI token tracking
     ai_tokens_cost: Mapped[int] = mapped_column(default=0)  # Tokens used to generate this question

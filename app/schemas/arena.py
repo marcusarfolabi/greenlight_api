@@ -1,9 +1,10 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional
 from datetime import datetime
 
 
 class QuestionSchema(BaseModel):
+    id: Optional[int] = None  # Make id optional for creation
     prompt_text: str
     time_limit_seconds: int = Field(ge=5, le=300)
     options: List[str]
@@ -11,16 +12,15 @@ class QuestionSchema(BaseModel):
     point_value: int
     is_ai_generated: bool = False
     ai_tokens_cost: int = 0
+    status: str = "draft"  # active, draft, deleted
 
     class Config:
         from_attributes = True
 
 
 class QuestionResponse(QuestionSchema):
-    id: int
-
-    class Config:
-        from_attributes = True
+    id: Optional[int] = None  # Make id optional
+        
 
 
 class ArenaCreate(BaseModel):
@@ -30,8 +30,17 @@ class ArenaCreate(BaseModel):
     questions: List[QuestionSchema]
 
 
+class AIQuestionGenerationRequest(BaseModel):
+    subject: str
+    num_questions: int = Field(ge=1, le=20)
+    difficulty: str = Field(default="medium")  # easy, medium, hard
+    language: str = Field(default="en")
+    arena_id: Optional[int] = None
+
+
 class ArenaUpdate(BaseModel):
     arena_name: Optional[str] = None
+    status: Optional[str] = None  # active, draft, deleted
     category: Optional[str] = None
     is_public: Optional[bool] = None
 
@@ -50,10 +59,8 @@ class ArenaResponse(ArenaCreate):
     created_at: datetime
     updated_at: datetime
     ai_tokens_used: int
-    questions: List[QuestionResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ArenaDetailResponse(ArenaResponse):
@@ -61,7 +68,16 @@ class ArenaDetailResponse(ArenaResponse):
 
     class Config:
         from_attributes = True
+class ArenaTokenUsageLogResponse(BaseModel):
+    id: int
+    arena_id: int
+    tokens_used: int
+    operation: str
+    details: Optional[str] = None
+    created_at: datetime
 
+    class Config:
+        from_attributes = True
 
 class TokenUsageResponse(BaseModel):
     total_tokens: int

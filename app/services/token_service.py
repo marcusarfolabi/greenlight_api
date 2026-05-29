@@ -3,6 +3,7 @@ Token usage tracking for AI operations
 """
 import logging
 from typing import Optional
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.subscription import Subscription
@@ -37,7 +38,7 @@ class TokenService:
         total_used = db.query(Arena).filter(
             Arena.creator_organization_id == organization_id
         ).with_entities(
-            db.func.sum(Arena.ai_tokens_used).label("total")
+            func.sum(Arena.ai_tokens_used).label("total") # Use func directly
         ).scalar() or 0
 
         remaining = subscription.plan.ai_tokens - total_used

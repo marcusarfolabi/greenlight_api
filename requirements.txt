@@ -7,6 +7,10 @@ python-multipart
 pydantic-settings
 pyjwt
 fastapi-mail
-google-auth
 requests
 stripe
+# google-genai
+# google-auth
+
+google-genai>=2.6.0
+google-auth>=2.0.0
