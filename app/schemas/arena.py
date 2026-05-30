@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Optional
 from datetime import datetime
 
@@ -20,7 +20,15 @@ class QuestionSchema(BaseModel):
 
 class QuestionResponse(QuestionSchema):
     id: Optional[int] = None  # Make id optional
-        
+
+    @field_validator("options", mode="before")
+    @classmethod
+    def extract_option_text(cls, v):
+        """Extract text from QuestionOption objects if needed"""
+        if not v:
+            return v
+        # If options are objects with 'text' attribute, extract the text
+        return [opt.text if hasattr(opt, "text") else opt for opt in v]
 
 
 class ArenaCreate(BaseModel):
@@ -52,13 +60,17 @@ class ArenaTokenInfo(BaseModel):
     ai_generated_questions: int
 
 
-class ArenaResponse(ArenaCreate):
+class ArenaResponse(BaseModel):
     id: int
+    arena_name: str
+    category: str
+    is_public: bool
     creator_id: int
     creator_organization_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     ai_tokens_used: int
+    questions: List[QuestionResponse]
 
     model_config = ConfigDict(from_attributes=True)
 

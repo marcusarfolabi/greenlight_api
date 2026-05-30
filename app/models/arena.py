@@ -8,7 +8,9 @@ class Arena(Base):
     __tablename__ = "arenas"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    title: Mapped[str] = mapped_column(String(100), nullable=False)
+    arena_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    title: Mapped[str] = mapped_column(String(100), nullable=False)  # Kept for backward compatibility
+    category: Mapped[str] = mapped_column(String(100), nullable=False)
     is_public: Mapped[bool] = mapped_column(default=False)
     creator_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     creator_organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), nullable=True)
