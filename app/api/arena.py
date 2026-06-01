@@ -69,7 +69,8 @@ async def create_arena(
 
     # Create arena
     new_arena = Arena(
-        title=data.arena_name,
+        arena_name=data.arena_name,
+        category=data.category,
         creator_id=current_user.user_id,
         creator_organization_id=org_id,
         is_public=data.is_public,
@@ -160,7 +161,7 @@ async def generate_questions_ai(
     current_user: AuthContext = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Generate questions using AI"""
+    """Generate questions using AI (preview only, not saved to DB)"""
      
     user = db.query(User).filter(User.id == current_user.user_id).first()
     if not user:
@@ -203,65 +204,16 @@ async def generate_questions_ai(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=error_msg
             )
 
-        # if data.arena_id is not None:
-        #     arena = db.query(Arena).filter(Arena.id == data.arena_id).first()
-        #     if not arena:
-        #         raise HTTPException(
-        #             status_code=status.HTTP_404_NOT_FOUND,
-        #             detail="Arena not found for question persistence",
-        #         )
-        #     if arena.creator_id != current_user.user_id:
-        #         raise HTTPException(
-        #             status_code=status.HTTP_403_FORBIDDEN,
-        #             detail="Not authorized to add generated questions to this arena",
-        #         )
-        if data.arena_id:
-            arena = db.query(Arena).filter(Arena.id == data.arena_id).first()
-            if not arena or arena.creator_id != current_user.user_id:
-                raise HTTPException(status_code=403, detail="Arena not found or unauthorized")
-        else:
-            # Create a new Arena automatically
-            arena = Arena(
-                title=f"AI Quiz: {data.subject[:30]}", 
-                creator_id=current_user.user_id,
-                creator_organization_id=org.id,
-                is_public=False
+        # Log token usage (preview generation)
+        if total_tokens > 0:
+            usage_log = ArenaTokenUsageLog(
+                arena_id=None,
+                tokens_used=total_tokens,
+                operation="ai_question_generation_preview",
+                details=f"Generated {len(generated_questions)} AI questions for preview",
             )
-            db.add(arena)
-            db.flush()
-
-            tokens_consumed = 0
-            for q in generated_questions:
-                question = Question(
-                    arena_id=arena.id,
-                    prompt_text=q.prompt_text,
-                    time_limit_seconds=q.time_limit_seconds,
-                    correct_option_index=q.correct_option_index,
-                    point_value=q.point_value,
-                    status=q.status or "draft",
-                    ai_tokens_cost=q.ai_tokens_cost,
-                    is_ai_generated=True,
-                )
-                db.add(question)
-                db.flush()
-
-                for opt_text in q.options:
-                    db.add(QuestionOption(question_id=question.id, text=opt_text))
-
-                tokens_consumed += q.ai_tokens_cost
-
-            if tokens_consumed > 0:
-                arena.ai_tokens_used = (arena.ai_tokens_used or 0) + tokens_consumed
-                usage_log = ArenaTokenUsageLog(
-                    arena_id=arena.id,
-                    tokens_used=tokens_consumed,
-                    operation="ai_question_generation",
-                    details=f"Generated {len(generated_questions)} AI questions",
-                )
-                db.add(usage_log)
-
+            db.add(usage_log)
             db.commit()
-            db.refresh(arena)
 
         logger.info(
             f"Generated {len(generated_questions)} questions for user {current_user.user_id}, tokens: {total_tokens}"
@@ -318,8 +270,8 @@ async def get_arena(
     # Pass it as a keyword argument correctly
     return ArenaDetailResponse(
         id=arena.id,
-        arena_name=arena.title,
-        category="General",
+        arena_name=arena.arena_name,
+        category=arena.category,
         is_public=arena.is_public,
         questions=[QuestionResponse.model_validate(q) for q in arena.questions], # Convert questions too!
         creator_id=arena.creator_id,
@@ -354,7 +306,9 @@ async def update_arena(
 
     # Update fields if provided
     if data.arena_name:
-        arena.title = data.arena_name
+        arena.arena_name = data.arena_name
+    if data.category:
+        arena.category = data.category
     if data.is_public is not None:
         arena.is_public = data.is_public
 
