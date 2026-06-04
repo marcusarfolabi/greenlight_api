@@ -12,7 +12,7 @@ class QuestionSchema(BaseModel):
     point_value: int
     is_ai_generated: bool = False
     ai_tokens_cost: int = 0
-    status: str = "draft"  # active, draft, deleted
+    status: str = "ready"  # ready, draft, deleted
 
     class Config:
         from_attributes = True
@@ -57,6 +57,9 @@ class ArenaTokenInfo(BaseModel):
     ai_tokens_used: int
     total_questions: int
     ai_generated_questions: int
+    total_players: int = 0
+    completed_players: int = 0
+    completion_rate: float = 0.0
 
 
 class ArenaResponse(BaseModel):

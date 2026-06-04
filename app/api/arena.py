@@ -16,6 +16,7 @@ from app.schemas.arena import (
     AIQuestionGenerationRequest,
 )
 from app.models.arena import Arena, Question, QuestionOption, ArenaTokenUsageLog
+from app.models.player import Player
 from app.models.user import User
 from app.schemas.user import AuthContext
 from app.services.token_service import TokenService
@@ -95,7 +96,7 @@ async def create_arena(
             time_limit_seconds=q.time_limit_seconds,
             correct_option_index=q.correct_option_index,
             point_value=q.point_value,
-            status=q.status or "draft",
+            status=q.status or "ready",
             ai_tokens_cost=token_cost,
             is_ai_generated=q.is_ai_generated,
         )
@@ -135,24 +136,6 @@ async def create_arena(
         )
 
     return new_arena
-
-
-@router.get("", response_model=list[ArenaResponse])
-async def list_arenas(
-    skip: int = 0,
-    limit: int = 10,
-    current_user: AuthContext = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """List arenas created by the current user"""
-    arenas = (
-        db.query(Arena)
-        .filter(Arena.creator_id == current_user.user_id)
-        .offset(skip)
-        .limit(limit)
-        .all()
-    )
-    return arenas
 
 
 @router.post("/generate/questions", response_model=list[QuestionResponse])
@@ -197,21 +180,11 @@ async def generate_questions_ai(
         # Calculate token cost
         total_tokens = sum(q.ai_tokens_cost for q in generated_questions)
 
-        # Check token availability
+        # Check token availability for preview request
         can_use, error_msg = TokenService.can_use_tokens(db, org.id, total_tokens)
         if not can_use:
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=error_msg
-            )
-
-        # Log token usage (preview generation)
-        if total_tokens > 0:
-            TokenService.log_token_usage(
-                db=db,
-                arena_id=None,
-                organization_id=org.id,
-                tokens_used=total_tokens,
-                operation="ai_question_generation_preview",
             )
 
         logger.info(
@@ -231,6 +204,24 @@ async def generate_questions_ai(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate questions",
         )
+
+
+@router.get("", response_model=list[ArenaResponse])
+async def list_arenas(
+    skip: int = 0,
+    limit: int = 10,
+    current_user: AuthContext = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List arenas created by the current user"""
+    arenas = (
+        db.query(Arena)
+        .filter(Arena.creator_id == current_user.user_id)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return arenas
 
 
 @router.get("/{arena_id}", response_model=ArenaDetailResponse)
@@ -259,10 +250,21 @@ async def get_arena(
         Question.arena_id == arena_id, Question.is_ai_generated == True
     ).count()
 
+    # Calculate player stats
+    total_players = db.query(Player).filter(Player.arena_id == arena_id).count()
+    completed_players = db.query(Player).filter(
+        Player.arena_id == arena_id,
+        Player.status == "completed"
+    ).count()
+    completion_rate = (completed_players / total_players * 100) if total_players > 0 else 0.0
+
     token_info_dict = {
         "ai_tokens_used": arena.ai_tokens_used,
         "total_questions": len(arena.questions),
         "ai_generated_questions": ai_generated,
+        "total_players": total_players,
+        "completed_players": completed_players,
+        "completion_rate": completion_rate,
     }
 
     # Pass it as a keyword argument correctly

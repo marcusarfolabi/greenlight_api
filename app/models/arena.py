@@ -9,6 +9,7 @@ from .base import Base
 
 if TYPE_CHECKING:
     from .organization import Organization
+    from .player import Player
 
 class Arena(Base):
     __tablename__ = "arenas"
@@ -29,6 +30,9 @@ class Arena(Base):
     questions: Mapped[List["Question"]] = relationship(
         back_populates="arena", cascade="all, delete-orphan"
     )
+    players: Mapped[List["Player"]] = relationship(
+        "Player", back_populates="arena", cascade="all, delete-orphan"
+    )
     token_usage_logs: Mapped[List["ArenaTokenUsageLog"]] = relationship(
         back_populates="arena", cascade="all, delete-orphan"
     )
@@ -42,7 +46,7 @@ class Question(Base):
     time_limit_seconds: Mapped[int] = mapped_column(default=10)
     point_value: Mapped[int] = mapped_column(default=10)
     correct_option_index: Mapped[int] = mapped_column()
-    status: Mapped[str] = mapped_column(String(10), default="draft")  # active, draft, deleted
+    status: Mapped[str] = mapped_column(String(10), default="ready")  # ready, draft, deleted
     
     # AI token tracking
     ai_tokens_cost: Mapped[int] = mapped_column(default=0)  # Tokens used to generate this question

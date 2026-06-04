@@ -2,6 +2,7 @@ from .base import Base
 from .user import User, UserRole, PayoutProfile
 from .organization import Organization
 from .arena import Arena, Question, QuestionOption
+from .player import Player
 from .wallet import Wallet, Transaction, TransactionType
 from .subscription import SubscriptionPlan, SubscriptionPlanType, Subscription
 from .category import Category
@@ -16,6 +17,7 @@ __all__ = [
     "Arena",
     "Question",
     "QuestionOption",
+    "Player",
     "Wallet",
     "Transaction",
     "TransactionType",

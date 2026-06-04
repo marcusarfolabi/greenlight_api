@@ -70,7 +70,7 @@ class AIQuestionGenerationService:
                         point_value=q_data.get("point_value", 10),
                         is_ai_generated=True,
                         ai_tokens_cost=token_cost,
-                        status="draft",
+                        status="ready",
                     )
                     questions.append(question)
                 except Exception as e:
