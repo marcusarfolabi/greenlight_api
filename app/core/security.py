@@ -85,8 +85,6 @@ async def get_current_user(request: Request) -> AuthContext:
     token = request.cookies.get("auth_token")
     
     if not token:
-        # Debugging: log what cookies ARE present
-        print(f"DEBUG: Cookies received: {request.cookies}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated"

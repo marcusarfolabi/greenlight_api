@@ -22,9 +22,9 @@ from app.core.security import get_current_user
 from app.schemas.user import AuthContext
 
 
-
-
 router = APIRouter()
+
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

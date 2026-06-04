@@ -8,6 +8,7 @@ from jose import jwt, JWTError
 
 from app.core.security import hash_password
 from app.models.user import User
+from app.models.wallet import Wallet
 from app.schemas.user import UserCreate, UserUpdate
 from app.core.config import settings
 class UserService:
@@ -42,6 +43,12 @@ class UserService:
             role=user_data.role.value if isinstance(user_data.role, enum.Enum) else user_data.role,
         )
         db.add(db_user)
+        db.flush()
+
+        # Ensure each user has a dedicated wallet on signup.
+        # Only user_id is set here; organization wallets are created separately when orgs exist.
+        # user_wallet = Wallet(user_id=db_user.id, balance=0, currency="gbp")
+        # db.add(user_wallet)
         db.commit()
         db.refresh(db_user)
         return db_user

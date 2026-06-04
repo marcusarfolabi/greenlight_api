@@ -8,6 +8,7 @@ from app.models.organization import Organization
 from app.models.wallet import Wallet
 from app.schemas.organization import OrganizationCreate, OrgSettingsResponse
 from app.services.stripe_connect import StripeConnectService
+from app.models.user import User
 
 
 logger = logging.getLogger(__name__)
@@ -37,20 +38,29 @@ class OrganizationService:
         Creates a new organization in the database and links it to a specific host user.
         """
         try:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found while creating organization."
+                )
+
             db_org = Organization(
                 name=org_data.name,
                 subdomain=org_data.subdomain,
                 industry=org_data.industry,
-                owner_id=user_id,          
+                owner_id=user_id,
             )
-            
+
             db.add(db_org)
             db.flush()
 
-            db.add(Wallet(organization_id=db_org.id, balance=0, currency="usd"))
+            db.add(Wallet(organization_id=db_org.id, user_id=user_id, balance=0, currency="gbp"))
+            user.organization_id = db_org.id
             db.commit()
             db.refresh(db_org)
-            
+            db.refresh(user)
+
             logger.info(f"Successfully created organization '{db_org.name}' for user ID {user_id}")
             return db_org
 
@@ -73,7 +83,7 @@ class OrganizationService:
         if wallet:
             return wallet
 
-        wallet = Wallet(organization_id=organization_id, balance=0, currency="usd")
+        wallet = Wallet(organization_id=organization_id, user_id=None, balance=0, currency="gbp")
         db.add(wallet)
         db.commit()
         db.refresh(wallet)

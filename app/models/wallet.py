@@ -26,12 +26,21 @@ class Wallet(Base):
     organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), unique=True)
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), unique=True)
     
-    balance: Mapped[int] = mapped_column(Integer, default=0) # Stored in cents (e.g. 1000 = $10.00)
-    currency: Mapped[str] = mapped_column(String(3), default="usd")
+    balance: Mapped[int] = mapped_column(Integer, default=0) 
+    pending_balance: Mapped[int] = mapped_column(Integer, default=0) 
+    currency: Mapped[str] = mapped_column(String(3), default="gbp")
 
     transactions: Mapped[List["Transaction"]] = relationship(back_populates="wallet", cascade="all, delete-orphan")
-    organization: Mapped["Organization"] = relationship(back_populates="wallet")
-    user: Mapped[Optional["User"]] = relationship(back_populates="wallet")
+    organization: Mapped[Optional["Organization"]] = relationship(
+        "Organization",
+        back_populates="wallet",
+        foreign_keys="[Wallet.organization_id]",
+    )
+    user: Mapped[Optional["User"]] = relationship(
+        "User",
+        back_populates="wallet",
+        foreign_keys="[Wallet.user_id]",
+    )
     
 class Transaction(Base):
     __tablename__ = "transactions"

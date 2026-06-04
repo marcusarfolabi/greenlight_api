@@ -14,15 +14,50 @@ from app.api import api_router
 from app.db.session import engine
 from app.models import Base
 from app.core.config import settings
+from sqlalchemy.exc import OperationalError
+from app.scripts.admin_seeder import seed_superadmin
+from app.scripts.subscription_seeder import seed_subscription_plans
 
 logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
 
-Base.metadata.create_all(bind=engine)
-
 security = HTTPBasic()
- 
+
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    description="Host the live arena for gamers, streamers, and esports enthusiasts. Watch live streams, join tournaments, and connect with the gaming community.",
+    version="2.0.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+
+    redirect_slashes=False,
+    swagger_ui_parameters={
+        "tryItOutEnabled": True,
+        "persistAuthorization": True
+    }
+)
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Initializing database and running seeders...")
+    try:
+        Base.metadata.create_all(bind=engine)
+        # seed_superadmin()
+        # seed_subscription_plans()
+        logger.info("Database initialization and seeding complete.")
+    except OperationalError as e:
+        logger.error(
+            "Database connection failed on startup. "
+            "Check DB_HOST/DB_PORT/POSTGRES_* settings and whether the database is reachable."
+        )
+        raise
+    except Exception as e:
+        logger.error(f"Startup seeding failed: {e}")
+        raise
+
+
 def get_admin_user(credentials: HTTPBasicCredentials = Depends(security)):
     correct_username = os.getenv("API_ADMIN_USERNAME")
     correct_password = os.getenv("API_ADMIN_PASSWORD")
@@ -48,20 +83,6 @@ def get_admin_user(credentials: HTTPBasicCredentials = Depends(security)):
         )
     return credentials.username
 
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    description="Host the live arena for gamers, streamers, and esports enthusiasts. Watch live streams, join tournaments, and connect with the gaming community.",
-    version="2.0.0",
-    docs_url=None,
-    redoc_url=None,
-    openapi_url=None,
-
-    redirect_slashes=False,
-    swagger_ui_parameters={
-        "tryItOutEnabled": True,
-        "persistAuthorization": True
-    }
-)
 
 @app.get("/docs", include_in_schema=False)
 async def get_swagger_documentation(

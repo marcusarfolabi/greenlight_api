@@ -114,13 +114,13 @@ async def create_arena(
 
         # Log token usage
         if tokens_consumed > 0:
-            usage_log = ArenaTokenUsageLog(
+            TokenService.log_token_usage(
+                db=db,
                 arena_id=new_arena.id,
+                organization_id=org_id,
                 tokens_used=tokens_consumed,
                 operation="arena_creation",
-                details=f"Created {len(data.questions)} questions",
             )
-            db.add(usage_log)
 
     db.commit()
     db.refresh(new_arena)
@@ -206,14 +206,13 @@ async def generate_questions_ai(
 
         # Log token usage (preview generation)
         if total_tokens > 0:
-            usage_log = ArenaTokenUsageLog(
+            TokenService.log_token_usage(
+                db=db,
                 arena_id=None,
+                organization_id=org.id,
                 tokens_used=total_tokens,
                 operation="ai_question_generation_preview",
-                details=f"Generated {len(generated_questions)} AI questions for preview",
             )
-            db.add(usage_log)
-            db.commit()
 
         logger.info(
             f"Generated {len(generated_questions)} questions for user {current_user.user_id}, tokens: {total_tokens}"
@@ -262,7 +261,6 @@ async def get_arena(
 
     token_info_dict = {
         "ai_tokens_used": arena.ai_tokens_used,
-        "ai_tokens_budget": arena.ai_tokens_budget,
         "total_questions": len(arena.questions),
         "ai_generated_questions": ai_generated,
     }
@@ -382,8 +380,7 @@ async def get_token_usage_logs(
 
     logs = (
         db.query(ArenaTokenUsageLog)
-        .join(Arena, ArenaTokenUsageLog.arena_id == Arena.id)
-        .filter(Arena.creator_organization_id == user.owned_organization.id)
+        .filter(ArenaTokenUsageLog.organization_id == user.owned_organization.id)
         .order_by(ArenaTokenUsageLog.created_at.desc())
         .all()
     )

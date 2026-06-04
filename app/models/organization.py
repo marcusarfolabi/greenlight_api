@@ -24,10 +24,25 @@ class Organization(Base):
     is_verified: Mapped[bool] = mapped_column(default=False)
     
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    owner: Mapped["User"] = relationship(back_populates="owned_organization")
-    
+    owner: Mapped["User"] = relationship(
+        "User",
+        back_populates="owned_organization",
+        foreign_keys=[owner_id],
+    )
+    members: Mapped[List["User"]] = relationship(
+        "User",
+        back_populates="organization",
+        foreign_keys="[User.organization_id]",
+        lazy="selectin",
+    )
+
     # One-to-one link to their financial wallet
-    wallet: Mapped["Wallet"] = relationship(back_populates="organization", uselist=False)
+    wallet: Mapped["Wallet"] = relationship(
+        "Wallet",
+        back_populates="organization",
+        foreign_keys="[Wallet.organization_id]",
+        uselist=False,
+    )
 
     # ============ BRANDING SETTINGS ============
     brand_color: Mapped[str] = mapped_column(String(7), default="#10B981")  # Hex color code

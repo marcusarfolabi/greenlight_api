@@ -5,14 +5,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.core.config import settings
+from app.core.security import hash_password
 from app.db.session import SessionLocal 
 from app.models.user import User, UserRole
 from app.models.wallet import Wallet
-
-def mock_hash_password(password: str) -> str:
-    """Fallback hashing method. 
-    Replace this implementation with your project's security utils function."""
-    return f"hashed_{password}"
 
 
 def seed_superadmin():
@@ -21,7 +17,9 @@ def seed_superadmin():
     
     admin_username = getattr(settings, "ADMIN_USERNAME", "superadmin")
     admin_email = getattr(settings, "ADMIN_EMAIL", "admin@greenlight.app")
-    admin_raw_password = getattr(settings, "ADMIN_PASSWORD", "admin@123")
+    admin_firstname = getattr(settings, "ADMIN_FIRSTNAME", "Moses")
+    admin_lastname = getattr(settings, "ADMIN_LASTNAME", "David")
+    admin_raw_password = getattr(settings, "ADMIN_PASSWORD", ".Admin!Green@151k")
 
     print("Connecting to database using application settings configuration...")
     session = SessionLocal()
@@ -38,14 +36,16 @@ def seed_superadmin():
             return
 
         print("Encrypting administrative credential key protocols...")
-        hashed_password = mock_hash_password(admin_raw_password)
+        hashed_password = hash_password(admin_raw_password)
 
         print("Constructing superadmin root instance target...")
         admin_user = User(
             username=admin_username,
             email=admin_email,
+            first_name=admin_firstname,
+            last_name=admin_lastname,
             hashed_password=hashed_password,
-            role=UserRole.SUPERADMIN,
+            role=UserRole.SUPERADMIN.value,
             is_active=True
         )
         
@@ -56,7 +56,8 @@ def seed_superadmin():
         admin_wallet = Wallet(
             user_id=admin_user.id,
             balance=0,
-            currency="usd"
+            pending_balance=0,
+            currency="gbp"
         )
         session.add(admin_wallet)
 

@@ -55,7 +55,6 @@ class ArenaUpdate(BaseModel):
 
 class ArenaTokenInfo(BaseModel):
     ai_tokens_used: int
-    ai_tokens_budget: Optional[int] = None
     total_questions: int
     ai_generated_questions: int
 
@@ -82,7 +81,7 @@ class ArenaDetailResponse(ArenaResponse):
         from_attributes = True
 class ArenaTokenUsageLogResponse(BaseModel):
     id: int
-    arena_id: int
+    arena_id: Optional[int] = None
     tokens_used: int
     operation: str
     details: Optional[str] = None

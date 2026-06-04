@@ -6,6 +6,8 @@ from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.models.arena import Arena
+from app.models.user import User
 from app.models.subscription import Subscription
 from app.core.config import settings
 
@@ -32,15 +34,21 @@ class TokenService:
                 "has_tokens": False
             }
 
-        # Get token usage from arenas
-        from app.models.arena import Arena
+        # Get token usage from arenas and preview logs
+        from app.models.arena import Arena, ArenaTokenUsageLog
 
-        total_used = db.query(Arena).filter(
+        total_used_in_arenas = db.query(Arena).filter(
             Arena.creator_organization_id == organization_id
         ).with_entities(
-            func.sum(Arena.ai_tokens_used).label("total") # Use func directly
+            func.sum(Arena.ai_tokens_used).label("total")
         ).scalar() or 0
 
+        preview_used = db.query(func.coalesce(func.sum(ArenaTokenUsageLog.tokens_used), 0)).filter(
+            ArenaTokenUsageLog.organization_id == organization_id,
+            ArenaTokenUsageLog.operation == "ai_question_generation_preview"
+        ).scalar() or 0
+
+        total_used = total_used_in_arenas + preview_used
         remaining = subscription.plan.ai_tokens - total_used
 
         return {
@@ -94,18 +102,63 @@ class TokenService:
     @staticmethod
     def log_token_usage(
         db: Session,
-        arena_id: int,
+        arena_id: Optional[int],
         tokens_used: int,
-        operation: str = "question_generation"
+        operation: str = "question_generation",
+        organization_id: Optional[int] = None,
     ) -> None:
         """Log token usage for auditing"""
         from app.models.arena import ArenaTokenUsageLog
 
         usage_log = ArenaTokenUsageLog(
             arena_id=arena_id,
+            organization_id=organization_id,
             tokens_used=tokens_used,
-            operation=operation
+            operation=operation,
         )
         db.add(usage_log)
         db.commit()
-        logger.info(f"Logged {tokens_used} tokens for arena {arena_id} ({operation})")
+        logger.info(
+            f"Logged {tokens_used} tokens for arena {arena_id} ({operation})"
+        )
+        
+    @staticmethod
+    def can_create_arena(db: Session, organization_id: int) -> tuple[bool, Optional[str]]:
+        """Check if organization can create a new arena based on subscription limits"""
+        subscription = db.query(Subscription).filter(
+            Subscription.organization_id == organization_id,
+            Subscription.status == "active"
+        ).first()
+
+        if not subscription:
+            return False, "No active subscription"
+
+        arena_count = db.query(Arena).filter(
+            Arena.creator_organization_id == organization_id
+        ).count()
+
+        if subscription.plan.max_arenas is not None and arena_count >= subscription.plan.max_arenas:
+            return False, f"Arena limit reached. Max allowed: {subscription.plan.max_arenas}"
+
+        return True, None
+    
+    # determine if the organization can add more players according to their subscription plan
+    @staticmethod
+    def can_add_players(db: Session, organization_id: int, additional_players: int) -> tuple[bool, Optional[str]]:
+        """Check if organization can add more players based on subscription limits"""
+        subscription = db.query(Subscription).filter(
+            Subscription.organization_id == organization_id,
+            Subscription.status == "active"
+        ).first()
+
+        if not subscription:
+            return False, "No active subscription"
+
+        current_player_count = db.query(User).filter(
+            User.organization_id == organization_id
+        ).count()
+
+        if subscription.plan.max_players is not None and (current_player_count + additional_players) > subscription.plan.max_players:
+            return False, f"Player limit reached. Max allowed: {subscription.plan.max_players}"
+
+        return True, None

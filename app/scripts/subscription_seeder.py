@@ -5,6 +5,11 @@ import logging
 # Setup path before imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+# Load environment variables BEFORE importing app modules
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=".env.docker")
+load_dotenv(dotenv_path=".env")
+
 import stripe # type: ignore
 
 from app.core.config import settings
@@ -20,11 +25,12 @@ logging.basicConfig(level=logging.INFO)
 def seed_subscription_plans():
     """Seeds the default subscription plans (Free, Standard, Pro) using Stripe."""
 
-    if not settings.STRIPE_SECRET_KEY:
-        print("❌ Error: STRIPE_SECRET_KEY is not configured")
-        sys.exit(1)
+    stripe_key = settings.STRIPE_SECRET_KEY
+    if not stripe_key:
+        print("⚠️  Warning: STRIPE_SECRET_KEY is not configured. Stripe products will be skipped.")
+    else:
+        stripe.api_key = stripe_key
 
-    stripe.api_key = settings.STRIPE_SECRET_KEY
     session = SessionLocal()
 
     try:
@@ -104,40 +110,42 @@ def seed_subscription_plans():
             stripe_price_id = None
 
             if plan_config["price"] > 0:
-                print(f"   🔗 Creating Stripe product for {plan_name}...")
-                try:
-                    product = stripe.Product.create(
-                        name=f"Greenlight {plan_name} Plan",
-                        description=plan_config["description"],
-                        metadata={
-                            "plan_type": plan_config["plan_type"],
-                            "max_players": plan_config.get("max_players", "unlimited"),
-                            "max_arenas": plan_config.get("max_arenas", "unlimited"),
-                        },
-                    )
-                    stripe_product_id = product.id
-                    print(f"      ✅ Product created: {stripe_product_id}")
+                if not stripe_key:
+                    print(f"   ⚠️  Skipping Stripe creation (key not configured)")
+                else:
+                    print(f"   🔗 Creating Stripe product for {plan_name}...")
+                    try:
+                        product = stripe.Product.create(
+                            name=f"Greenlight {plan_name} Plan",
+                            description=plan_config["description"],
+                            metadata={
+                                "plan_type": plan_config["plan_type"],
+                                "max_players": plan_config.get("max_players", "unlimited"),
+                                "max_arenas": plan_config.get("max_arenas", "unlimited"),
+                            },
+                        )
+                        stripe_product_id = product.id
+                        print(f"      ✅ Product created: {stripe_product_id}")
 
-                    print(f"   🔗 Creating Stripe price for {plan_name}...")
-                    price = stripe.Price.create(
-                        product=stripe_product_id,
-                        unit_amount=int(plan_config["price"] * 100),  # Convert to cents
-                        currency=plan_config["currency"],
-                        recurring={
-                            "interval": plan_config["interval"],
-                            "interval_count": 1,
-                        },
-                        metadata={
-                            "plan_type": plan_config["plan_type"],
-                        },
-                    )
-                    stripe_price_id = price.id
-                    print(f"      ✅ Price created: {stripe_price_id}")
+                        print(f"   🔗 Creating Stripe price for {plan_name}...")
+                        price = stripe.Price.create(
+                            product=stripe_product_id,
+                            unit_amount=int(plan_config["price"] * 100),  # Convert to cents
+                            currency=plan_config["currency"],
+                            recurring={
+                                "interval": plan_config["interval"],
+                                "interval_count": 1,
+                            },
+                            metadata={
+                                "plan_type": plan_config["plan_type"],
+                            },
+                        )
+                        stripe_price_id = price.id
+                        print(f"      ✅ Price created: {stripe_price_id}")
 
-                except Exception as e:
-                    print(f"   ❌ Stripe error: {str(e)}")
-                    session.rollback()
-                    sys.exit(1)
+                    except Exception as e:
+                        print(f"   ❌ Stripe error: {str(e)}")
+                        # Continue without Stripe IDs rather than failing
             else:
                 print(f"   ℹ️  Skipping Stripe creation for Free plan")
 
@@ -170,9 +178,9 @@ def seed_subscription_plans():
 
         session.commit()
         print("\n🎉 Success! All subscription plans have been seeded:")
-        print("   ✅ Free Plan - $0/month")
-        print("   ✅ Standard Plan - $14.99/month")
-        print("   ✅ Pro Plan - $49.99/month")
+        print("   ✅ Free Plan - £0/month")
+        print("   ✅ Standard Plan - £14.99/month")
+        print("   ✅ Pro Plan - £49.99/month")
 
     except Exception as e:
         session.rollback()

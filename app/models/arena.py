@@ -1,8 +1,14 @@
-from typing import List, Optional
+from __future__ import annotations
+
+import secrets
+from typing import TYPE_CHECKING, List, Optional
 from datetime import datetime
 from sqlalchemy import String, ForeignKey, Text, Boolean, Integer, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
+
+if TYPE_CHECKING:
+    from .organization import Organization
 
 class Arena(Base):
     __tablename__ = "arenas"
@@ -14,9 +20,8 @@ class Arena(Base):
     creator_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     creator_organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), nullable=True)
     
-    # AI Token tracking
     ai_tokens_used: Mapped[int] = mapped_column(default=0)
-    ai_tokens_budget: Mapped[Optional[int]] = mapped_column(nullable=True)  # Optional per-arena budget
+    access_code: Mapped[Optional[int]] = mapped_column(default=lambda: secrets.randbelow(9000) + 1000, nullable=True)  # per-arena access code
 
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(insert_default=func.now(), onupdate=func.now())
@@ -64,7 +69,8 @@ class ArenaTokenUsageLog(Base):
     __tablename__ = "arena_token_usage_logs"
     
     id: Mapped[int] = mapped_column(primary_key=True)
-    arena_id: Mapped[int] = mapped_column(ForeignKey("arenas.id"))
+    arena_id: Mapped[Optional[int]] = mapped_column(ForeignKey("arenas.id"), nullable=True)
+    organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), nullable=True)
     tokens_used: Mapped[int] = mapped_column()
     operation: Mapped[str] = mapped_column(String(50))  # "question_generation", "regenerate", etc.
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -72,3 +78,4 @@ class ArenaTokenUsageLog(Base):
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
     
     arena: Mapped["Arena"] = relationship(back_populates="token_usage_logs")
+    organization: Mapped[Optional["Organization"]] = relationship("Organization")
