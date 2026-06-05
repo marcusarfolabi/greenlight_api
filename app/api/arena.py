@@ -15,7 +15,7 @@ from app.schemas.arena import (
     TokenUsageResponse,
     AIQuestionGenerationRequest,
 )
-from app.models.arena import Arena, Question, QuestionOption, ArenaTokenUsageLog
+from app.models.arena import Arena, Question, ArenaTokenUsageLog
 from app.models.player import Player
 from app.models.user import User
 from app.schemas.user import AuthContext
@@ -26,117 +26,193 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+# @router.post("", response_model=ArenaResponse)
+# async def create_arena(
+#     data: ArenaCreate,
+#     current_user: AuthContext = Depends(get_current_user),
+#     db: Session = Depends(get_db),
+# ):
+#     """Create a new arena with questions"""
+
+#     # Get user and organization
+#     user = db.query(User).filter(User.id == current_user.user_id).first()
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+#         )
+
+#     # Check if user has organization
+#     if not user.owned_organization:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="User must have an organization to create arenas",
+#         )
+
+#     org_id = user.owned_organization.id
+#     org = user.owned_organization
+
+#     # Calculate total tokens needed for all questions (only if AI is enabled)
+#     total_tokens_needed = 0
+#     if org.use_ai_for_arenas:
+#         total_tokens_needed = sum(
+#             TokenService.calculate_question_cost(
+#                 len(q.prompt_text), len(q.options), use_ai_generation=q.is_ai_generated
+#             )
+#             for q in data.questions
+#         )
+
+#         # Check token availability
+#         can_use, error_msg = TokenService.can_use_tokens(db, org_id, total_tokens_needed)
+#         if not can_use:
+#             raise HTTPException(
+#                 status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=error_msg
+#             )
+
+#     # Create arena
+#     new_arena = Arena(
+#         arena_name=data.arena_name,
+#         category=data.category,
+#         creator_id=current_user.user_id,
+#         creator_organization_id=org_id,
+#         is_public=data.is_public,
+#         ai_tokens_used=0,
+#     )
+#     db.add(new_arena)
+#     db.flush()
+
+#     # Create questions and track tokens
+#     tokens_consumed = 0
+#     for q in data.questions:
+#         # Only calculate token cost if AI is enabled for this organization
+#         token_cost = 0
+#         if org.use_ai_for_arenas and q.is_ai_generated:
+#             token_cost = TokenService.calculate_question_cost(
+#                 len(q.prompt_text), len(q.options), use_ai_generation=True
+#             )
+
+#         question = Question(
+#             arena_id=new_arena.id,
+#             prompt_text=q.prompt_text,
+#             time_limit_seconds=q.time_limit_seconds,
+#             correct_option_index=q.correct_option_index,
+#             point_value=q.point_value,
+#             status=q.status or "ready",
+#             ai_tokens_cost=token_cost,
+#             is_ai_generated=q.is_ai_generated,
+#             options_json=[{"text": opt_text} for opt_text in q.options],  # Store options as JSON
+#         )
+#         db.add(question)
+#         db.flush()
+
+#         tokens_consumed += token_cost
+
+#     # Update arena token usage (only if AI is enabled)
+#     if org.use_ai_for_arenas:
+#         new_arena.ai_tokens_used = tokens_consumed
+
+#         # Log token usage
+#         if tokens_consumed > 0:
+#             TokenService.log_token_usage(
+#                 db=db,
+#                 arena_id=new_arena.id,
+#                 organization_id=org_id,
+#                 tokens_used=tokens_consumed,
+#                 operation="arena_creation",
+#             )
+
+#     db.commit()
+#     db.refresh(new_arena)
+
+#     if org.use_ai_for_arenas:
+#         logger.info(
+#             f"Arena {new_arena.id} created by user {current_user.user_id}, consumed {tokens_consumed} tokens"
+#         )
+#     else:
+#         logger.info(
+#             f"Arena {new_arena.id} created by user {current_user.user_id} (AI usage disabled for organization)"
+#         )
+
+#     return new_arena
+
 @router.post("", response_model=ArenaResponse)
 async def create_arena(
     data: ArenaCreate,
     current_user: AuthContext = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Create a new arena with questions"""
-
-    # Get user and organization
+    """Create a new arena with atomic token deduction"""
+    
     user = db.query(User).filter(User.id == current_user.user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
+    if not user or not user.owned_organization:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Organization required")
 
-    # Check if user has organization
-    if not user.owned_organization:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User must have an organization to create arenas",
-        )
-
-    org_id = user.owned_organization.id
     org = user.owned_organization
 
-    # Calculate total tokens needed for all questions (only if AI is enabled)
-    total_tokens_needed = 0
-    if org.use_ai_for_arenas:
-        total_tokens_needed = sum(
-            TokenService.calculate_question_cost(
-                len(q.prompt_text), len(q.options), use_ai_generation=q.is_ai_generated
-            )
-            for q in data.questions
+    try:
+        # 1. Calculate tokens ONLY for AI-generated questions
+        total_ai_tokens = sum(
+            TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), use_ai_generation=True)
+            for q in data.questions if q.is_ai_generated
         )
 
-        # Check token availability
-        can_use, error_msg = TokenService.can_use_tokens(db, org_id, total_tokens_needed)
-        if not can_use:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=error_msg
-            )
+        # 2. Atomic Debit: Only if AI is enabled and there are costs
+        if org.use_ai_for_arenas and total_ai_tokens > 0:
+            if not TokenService.deduct_tokens(db, org.id, total_ai_tokens):
+                raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient tokens")
 
-    # Create arena
-    new_arena = Arena(
-        arena_name=data.arena_name,
-        category=data.category,
-        creator_id=current_user.user_id,
-        creator_organization_id=org_id,
-        is_public=data.is_public,
-        ai_tokens_used=0,
-    )
-    db.add(new_arena)
-    db.flush()
-
-    # Create questions and track tokens
-    tokens_consumed = 0
-    for q in data.questions:
-        # Only calculate token cost if AI is enabled for this organization
-        token_cost = 0
-        if org.use_ai_for_arenas and q.is_ai_generated:
-            token_cost = TokenService.calculate_question_cost(
-                len(q.prompt_text), len(q.options), use_ai_generation=True
-            )
-
-        question = Question(
-            arena_id=new_arena.id,
-            prompt_text=q.prompt_text,
-            time_limit_seconds=q.time_limit_seconds,
-            correct_option_index=q.correct_option_index,
-            point_value=q.point_value,
-            status=q.status or "ready",
-            ai_tokens_cost=token_cost,
-            is_ai_generated=q.is_ai_generated,
+        # 3. Create Arena
+        new_arena = Arena(
+            arena_name=data.arena_name,
+            category=data.category,
+            creator_id=current_user.user_id,
+            creator_organization_id=org.id,
+            is_public=data.is_public,
+            ai_tokens_used=total_ai_tokens,
         )
-        db.add(question)
+        db.add(new_arena)
         db.flush()
 
-        # Add question options
-        for opt_text in q.options:
-            db.add(QuestionOption(question_id=question.id, text=opt_text))
+        # 4. Create Questions
+        for q in data.questions:
+            token_cost = TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), True) if q.is_ai_generated else 0
+            
+            question = Question(
+                arena_id=new_arena.id,
+                prompt_text=q.prompt_text,
+                time_limit_seconds=q.time_limit_seconds,
+                correct_option_index=q.correct_option_index,
+                point_value=q.point_value,
+                status=q.status or "ready",
+                ai_tokens_cost=token_cost,
+                is_ai_generated=q.is_ai_generated,
+                options_json=[{"text": opt_text} for opt_text in q.options],
+            )
+            db.add(question)
 
-        tokens_consumed += token_cost
+        db.flush()  # Flush before logging to ensure arena has an ID
 
-    # Update arena token usage (only if AI is enabled)
-    if org.use_ai_for_arenas:
-        new_arena.ai_tokens_used = tokens_consumed
-
-        # Log token usage
-        if tokens_consumed > 0:
+        # 5. Log token usage
+        if org.use_ai_for_arenas and total_ai_tokens > 0:
             TokenService.log_token_usage(
                 db=db,
                 arena_id=new_arena.id,
-                organization_id=org_id,
-                tokens_used=tokens_consumed,
-                operation="arena_creation",
+                tokens_used=total_ai_tokens,
+                operation="arena_question_creation",
+                organization_id=org.id
             )
 
-    db.commit()
-    db.refresh(new_arena)
+        db.commit()
+        db.refresh(new_arena)
+        return new_arena
 
-    if org.use_ai_for_arenas:
-        logger.info(
-            f"Arena {new_arena.id} created by user {current_user.user_id}, consumed {tokens_consumed} tokens"
-        )
-    else:
-        logger.info(
-            f"Arena {new_arena.id} created by user {current_user.user_id} (AI usage disabled for organization)"
-        )
-
-    return new_arena
-
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Arena creation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Transaction failed")
+    
 
 @router.post("/generate/questions", response_model=list[QuestionResponse])
 async def generate_questions_ai(
@@ -311,6 +387,66 @@ async def update_arena(
         arena.category = data.category
     if data.is_public is not None:
         arena.is_public = data.is_public
+
+    # Replace questions if provided
+    if getattr(data, "questions", None) is not None:
+        # Delete existing questions for the arena
+        db.query(Question).filter(Question.arena_id == arena_id).delete(synchronize_session=False)
+        db.flush()
+
+        # Resolve user/org for token accounting
+        user = db.query(User).filter(User.id == current_user.user_id).first()
+        if not user or not user.owned_organization:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Organization required")
+        org = user.owned_organization
+
+        # Calculate total AI tokens for the new questions (only count if AI-generated)
+        total_ai_tokens = 0
+        qs = data.questions or []
+        for q in qs:
+            token_cost = 0
+            if org.use_ai_for_arenas and getattr(q, "is_ai_generated", False):
+                token_cost = TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), use_ai_generation=True)
+            total_ai_tokens += token_cost
+
+        # Attempt atomic debit of tokens if organization uses AI
+        if org.use_ai_for_arenas and total_ai_tokens > 0:
+            if not TokenService.deduct_tokens(db, org.id, total_ai_tokens):
+                raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient tokens")
+
+        # Create new question rows and attach computed token costs
+        for q in qs:
+            token_cost = 0
+            if org.use_ai_for_arenas and getattr(q, "is_ai_generated", False):
+                token_cost = TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), use_ai_generation=True)
+
+            new_q = Question(
+                arena_id=arena.id,
+                prompt_text=q.prompt_text,
+                time_limit_seconds=q.time_limit_seconds,
+                correct_option_index=q.correct_option_index,
+                point_value=q.point_value,
+                status=q.status or "ready",
+                ai_tokens_cost=token_cost,
+                is_ai_generated=q.is_ai_generated,
+                options_json=[{"text": opt_text} for opt_text in q.options],
+            )
+            db.add(new_q)
+
+        db.flush()
+
+        # Add consumed tokens to arena's running total (don't overwrite existing)
+        if org.use_ai_for_arenas and total_ai_tokens > 0:
+            arena.ai_tokens_used = (arena.ai_tokens_used or 0) + total_ai_tokens
+
+            # Log token usage for this update
+            TokenService.log_token_usage(
+                db=db,
+                arena_id=arena.id,
+                organization_id=org.id,
+                tokens_used=total_ai_tokens,
+                operation="arena_question_update",
+            )
 
     db.commit()
     db.refresh(arena)

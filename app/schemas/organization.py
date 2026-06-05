@@ -6,7 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class OrganizationBase(BaseModel):
     name: str
     subdomain: str
-    industry: str
+    industry: str 
+    capped_tokens: Optional[int] = None
     stripe_connect_id: Optional[str] = None
 
 

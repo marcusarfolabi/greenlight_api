@@ -1,5 +1,5 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import List, Optional
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from typing import Any, List, Optional
 from datetime import datetime
 
 
@@ -7,7 +7,7 @@ class QuestionSchema(BaseModel):
     id: Optional[int] = None  # Make id optional for creation
     prompt_text: str
     time_limit_seconds: int = Field(ge=5, le=300)
-    options: List[str]
+    options: List[str]  # List of option text strings
     correct_option_index: int
     point_value: int
     is_ai_generated: bool = False
@@ -21,14 +21,34 @@ class QuestionSchema(BaseModel):
 class QuestionResponse(QuestionSchema):
     id: Optional[int] = None  # Make id optional
 
-    @field_validator("options", mode="before")
+    @model_validator(mode='before')
     @classmethod
-    def extract_option_text(cls, v):
-        """Extract text from QuestionOption objects if needed"""
-        if not v:
-            return v
-        # If options are objects with 'text' attribute, extract the text
-        return [opt.text if hasattr(opt, "text") else opt for opt in v]
+    def handle_orm_object(cls, data: Any) -> Any:
+        """Convert ORM object to dict with options extracted from options_json"""
+        if hasattr(data, 'options_json'):
+            # It's an ORM object, extract the data
+            if isinstance(data.options_json, list) and len(data.options_json) > 0:
+                if isinstance(data.options_json[0], dict):
+                    options = [opt.get("text", "") for opt in data.options_json]
+                else:
+                    options = [opt.text if hasattr(opt, "text") else str(opt) for opt in data.options_json]
+            else:
+                options = []
+            
+            return {
+                'id': data.id,
+                'prompt_text': data.prompt_text,
+                'time_limit_seconds': data.time_limit_seconds,
+                'options': options,
+                'correct_option_index': data.correct_option_index,
+                'point_value': data.point_value,
+                'is_ai_generated': data.is_ai_generated,
+                'ai_tokens_cost': data.ai_tokens_cost,
+                'status': data.status,
+            }
+        return data
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ArenaCreate(BaseModel):
@@ -51,6 +71,7 @@ class ArenaUpdate(BaseModel):
     status: Optional[str] = None  # active, draft, deleted
     category: Optional[str] = None
     is_public: Optional[bool] = None
+    questions: Optional[List[QuestionSchema]] = None
 
 
 class ArenaTokenInfo(BaseModel):

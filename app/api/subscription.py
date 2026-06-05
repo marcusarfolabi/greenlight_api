@@ -290,6 +290,10 @@ async def confirm_payment(
             period_end = period_start + timedelta(days=365)
         else:  # Default to month
             period_end = period_start + timedelta(days=30)
+            
+        # Create the record in the capped_tokens in the organization model of the current user
+        organization.capped_tokens = plan.ai_tokens
+        db.commit()
         
         # Create subscription in database
         subscription = Subscription(

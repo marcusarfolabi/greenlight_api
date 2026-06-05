@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 from typing import TYPE_CHECKING, List, Optional
 from datetime import datetime
-from sqlalchemy import String, ForeignKey, Text, Boolean, Integer, func
+from sqlalchemy import String, ForeignKey, Text, func, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
 
@@ -51,21 +51,25 @@ class Question(Base):
     # AI token tracking
     ai_tokens_cost: Mapped[int] = mapped_column(default=0)  # Tokens used to generate this question
     is_ai_generated: Mapped[bool] = mapped_column(default=False)
+    
+    # JSON-based options storage (compact, single row per question)
+    options_json: Mapped[list] = mapped_column(JSON, default=list)  # [{"text": "option1"}, {"text": "option2"}, ...]
 
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
 
     arena: Mapped["Arena"] = relationship(back_populates="questions")
-    options: Mapped[List["QuestionOption"]] = relationship(
-        back_populates="question", cascade="all, delete-orphan"
-    )
+    # options: Mapped[List["QuestionOption"]] = relationship(
+    #     back_populates="question", cascade="all, delete-orphan"
+    # )
 
-class QuestionOption(Base):
-    __tablename__ = "question_options"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    question_id: Mapped[int] = mapped_column(ForeignKey("questions.id"))
-    text: Mapped[str] = mapped_column(String(255))
+# class QuestionOption(Base):
+#     """Legacy table - kept for backward compatibility. Use options_json in Question model instead."""
+#     __tablename__ = "question_options"
+#     id: Mapped[int] = mapped_column(primary_key=True)
+#     question_id: Mapped[int] = mapped_column(ForeignKey("questions.id"))
+#     text: Mapped[str] = mapped_column(String(255))
     
-    question: Mapped["Question"] = relationship(back_populates="options")
+#     question: Mapped["Question"] = relationship(back_populates="options")
 
 
 class ArenaTokenUsageLog(Base):
@@ -76,6 +80,7 @@ class ArenaTokenUsageLog(Base):
     arena_id: Mapped[Optional[int]] = mapped_column(ForeignKey("arenas.id"), nullable=True)
     organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), nullable=True)
     tokens_used: Mapped[int] = mapped_column()
+    capped_tokens: Mapped[Optional[int]] = mapped_column()
     operation: Mapped[str] = mapped_column(String(50))  # "question_generation", "regenerate", etc.
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     

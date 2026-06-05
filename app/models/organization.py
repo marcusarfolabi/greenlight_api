@@ -16,6 +16,7 @@ class Organization(Base):
     name: Mapped[str] = mapped_column(String(100))
     subdomain: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     industry: Mapped[str] = mapped_column(String(50))
+    capped_tokens: Mapped[Optional[int]] = mapped_column() 
 
     stripe_connect_id: Mapped[Optional[str]] = mapped_column(String(100))
     stripe_charges_enabled: Mapped[bool] = mapped_column(default=False)

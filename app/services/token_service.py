@@ -10,6 +10,7 @@ from app.models.arena import Arena
 from app.models.user import User
 from app.models.subscription import Subscription
 from app.core.config import settings
+from app.models.organization import Organization
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,22 @@ class TokenService:
         return True, None
 
     @staticmethod
+    def deduct_tokens(db: Session, org_id: int, amount: int) -> bool:
+        """
+        Atomically deducts tokens. Returns False if insufficient funds or account missing.
+        """
+        org = db.query(Organization).filter(Organization.id == org_id).with_for_update().first()
+        
+        current_balance = org.capped_tokens if org and org.capped_tokens is not None else 0
+        
+        if not org or current_balance < amount:
+            return False
+            
+        org.capped_tokens = current_balance - amount
+        
+        return True
+    
+    @staticmethod
     def calculate_question_cost(
         prompt_length: int,
         num_options: int,
@@ -104,6 +121,7 @@ class TokenService:
         db: Session,
         arena_id: Optional[int],
         tokens_used: int,
+        
         operation: str = "question_generation",
         organization_id: Optional[int] = None,
     ) -> None:
