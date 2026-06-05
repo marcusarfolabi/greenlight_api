@@ -1,9 +1,11 @@
 import logging
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body, File, Form, UploadFile, BackgroundTasks
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+import io
+import csv
 
 from app.db.session import get_db
 from app.core.security import get_current_user
@@ -25,9 +27,30 @@ from app.schemas.user import AuthContext
 from app.services.token_service import TokenService
 from app.services.ai_question_service import AIQuestionGenerationService
 from app.schemas.player import PlayerResponse
+from app.services.mail_service import MailService
+from app.services.twilio_service import TwilioService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def _bg_send_sms(to: str, recipient_name: Optional[str], body: str, arena_id: int):
+    try:
+        ok = await TwilioService.send_sms_arena_access_code_async(to, recipient_name, body)
+        if ok:
+            logger.info("Queued SMS sent to %s for arena %s", to, arena_id)
+        else:
+            logger.warning("Queued SMS failed to send to %s for arena %s", to, arena_id)
+    except Exception:
+        logger.exception("Error sending queued SMS to %s for arena %s", to, arena_id)
+
+
+async def _bg_send_email(to: str, recipient_name: Optional[str], subject: str, body: str, arena_details: dict, org_name: Optional[str]):
+    try:
+        await MailService.send_email_arena_access_code(to, recipient_name or "Participant", subject, body, arena_details, org_name)
+        logger.info("Queued email sent to %s for arena %s", to, arena_details.get("arena_name"))
+    except Exception:
+        logger.exception("Error sending queued email to %s for arena %s", to, arena_details.get("arena_name"))
 
 @router.post("", response_model=ArenaResponse)
 async def create_arena(
@@ -618,4 +641,73 @@ async def get_arena_players(
 
     return result
     
+
+@router.post("/{arena_id}/participants/upload")
+async def upload_participants_send_message(
+    arena_id: int,
+    background_tasks: BackgroundTasks,
+    channel: str = Form(...),
+    file: Optional[UploadFile] = File(None),  # Expecting uploaded file
+    contacts: Optional[str] = Form(None),  # Newline or comma separated contacts
+    message: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Upload participants via file or pasted contacts and send messages (SMS/Email)"""
+    arena = db.query(Arena).filter(Arena.id == arena_id).first()
+    if not arena:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Arena not found")
+    # get the arena organization name for email personalization
+    org_name = None
+    if arena.creator_organization_id:
+        org = db.query(User.owned_organization.property.mapper.class_).filter_by(id=arena.creator_organization_id).first()
+        if org:
+            org_name = org.name
+            
+    # Validate channel
+    if channel not in ["sms", "email"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid channel")
+
+    contacts_list = []
+    if file:
+        try:
+            content = await file.read()
+            decoded_file = io.StringIO(content.decode("utf-8"))
+            reader = csv.DictReader(decoded_file)
+            for row in reader:
+                name = row.get("name")
+                email = row.get("email")
+                phone = row.get("phone")
+                if channel == "sms" and phone:
+                    contacts_list.append({"name": name, "phone": phone})
+                elif channel == "email" and email:
+                    contacts_list.append({"name": name, "email": email})
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to process file: {str(e)}")
+
+    if contacts:
+        raw_contacts = [c.strip() for c in contacts.replace(",", "\n").split("\n") if c.strip()]
+        for c in raw_contacts:
+            if channel == "sms":
+                contacts_list.append({"phone": c})
+            elif channel == "email":
+                contacts_list.append({"email": c})
+
+    if not contacts_list:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid contacts provided")
+
+    # Queue send tasks in background to avoid long request time for large lists
+    queued = 0
+    for contact in contacts_list:
+        target = contact.get("phone") or contact.get("email")
+        recipient_name = contact.get("name") or "Participant"
+        payload_message = f"{message} Join here: https://greenlight-quiz.vercel.app/arena/{arena.id} with access code {arena.access_code}"
+
+        if channel == "sms":
+            background_tasks.add_task(_bg_send_sms, target, recipient_name, payload_message, arena.id)
+            queued += 1
+        elif channel == "email":
+            background_tasks.add_task(_bg_send_email, target, recipient_name, "You're invited to join an arena!", payload_message, {"arena_name": arena.arena_name, "access_code": arena.access_code}, org_name)
+            queued += 1
+
+    return {"total": len(contacts_list), "queued": queued, "message": "messages queued for background delivery"}
     

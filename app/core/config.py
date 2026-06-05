@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     STRIPE_CONNECT_REFRESH_URL: str = "http://localhost:3000/dashboard/settings/payouts?stripe=refresh"
     
     GEMINI_API_KEY: str = ""
+    
+    # Twilio configuration
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""
 
     model_config = SettingsConfigDict(
         env_file=(".env", ".env.docker"),
