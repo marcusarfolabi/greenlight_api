@@ -1,5 +1,7 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -24,115 +26,6 @@ from app.services.ai_question_service import AIQuestionGenerationService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-# @router.post("", response_model=ArenaResponse)
-# async def create_arena(
-#     data: ArenaCreate,
-#     current_user: AuthContext = Depends(get_current_user),
-#     db: Session = Depends(get_db),
-# ):
-#     """Create a new arena with questions"""
-
-#     # Get user and organization
-#     user = db.query(User).filter(User.id == current_user.user_id).first()
-#     if not user:
-#         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-#         )
-
-#     # Check if user has organization
-#     if not user.owned_organization:
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="User must have an organization to create arenas",
-#         )
-
-#     org_id = user.owned_organization.id
-#     org = user.owned_organization
-
-#     # Calculate total tokens needed for all questions (only if AI is enabled)
-#     total_tokens_needed = 0
-#     if org.use_ai_for_arenas:
-#         total_tokens_needed = sum(
-#             TokenService.calculate_question_cost(
-#                 len(q.prompt_text), len(q.options), use_ai_generation=q.is_ai_generated
-#             )
-#             for q in data.questions
-#         )
-
-#         # Check token availability
-#         can_use, error_msg = TokenService.can_use_tokens(db, org_id, total_tokens_needed)
-#         if not can_use:
-#             raise HTTPException(
-#                 status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=error_msg
-#             )
-
-#     # Create arena
-#     new_arena = Arena(
-#         arena_name=data.arena_name,
-#         category=data.category,
-#         creator_id=current_user.user_id,
-#         creator_organization_id=org_id,
-#         is_public=data.is_public,
-#         ai_tokens_used=0,
-#     )
-#     db.add(new_arena)
-#     db.flush()
-
-#     # Create questions and track tokens
-#     tokens_consumed = 0
-#     for q in data.questions:
-#         # Only calculate token cost if AI is enabled for this organization
-#         token_cost = 0
-#         if org.use_ai_for_arenas and q.is_ai_generated:
-#             token_cost = TokenService.calculate_question_cost(
-#                 len(q.prompt_text), len(q.options), use_ai_generation=True
-#             )
-
-#         question = Question(
-#             arena_id=new_arena.id,
-#             prompt_text=q.prompt_text,
-#             time_limit_seconds=q.time_limit_seconds,
-#             correct_option_index=q.correct_option_index,
-#             point_value=q.point_value,
-#             status=q.status or "ready",
-#             ai_tokens_cost=token_cost,
-#             is_ai_generated=q.is_ai_generated,
-#             options_json=[{"text": opt_text} for opt_text in q.options],  # Store options as JSON
-#         )
-#         db.add(question)
-#         db.flush()
-
-#         tokens_consumed += token_cost
-
-#     # Update arena token usage (only if AI is enabled)
-#     if org.use_ai_for_arenas:
-#         new_arena.ai_tokens_used = tokens_consumed
-
-#         # Log token usage
-#         if tokens_consumed > 0:
-#             TokenService.log_token_usage(
-#                 db=db,
-#                 arena_id=new_arena.id,
-#                 organization_id=org_id,
-#                 tokens_used=tokens_consumed,
-#                 operation="arena_creation",
-#             )
-
-#     db.commit()
-#     db.refresh(new_arena)
-
-#     if org.use_ai_for_arenas:
-#         logger.info(
-#             f"Arena {new_arena.id} created by user {current_user.user_id}, consumed {tokens_consumed} tokens"
-#         )
-#     else:
-#         logger.info(
-#             f"Arena {new_arena.id} created by user {current_user.user_id} (AI usage disabled for organization)"
-#         )
-
-#     return new_arena
 
 @router.post("", response_model=ArenaResponse)
 async def create_arena(
@@ -524,3 +417,92 @@ async def get_token_usage_logs(
     )
 
     return [ArenaTokenUsageLogResponse.model_validate(log) for log in logs]
+
+# validate arena access code and accept player nickname for players to be in the lobby on the FE
+@router.post("/validate-access-code")
+async def validate_access_code(
+    access_code: str = Body(...),
+    player_nickname: str = Body(...),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Validate arena access code for lobby entry"""
+    arena = db.query(Arena).filter(Arena.access_code == access_code).first()
+
+    if not arena:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Invalid access code"
+        )
+
+    # validate nickname
+    if not player_nickname or not player_nickname.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="player_nickname is required")
+
+    # coerce access code to int for storage
+    try:
+        access_code_int = int(access_code)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid access code format")
+
+    # determine organization id from arena
+    org_id = getattr(arena, "creator_organization_id", None) or getattr(arena, "organization_id", None)
+
+    # Check if this nickname already exists for the arena (idempotent)
+    existing = (
+        db.query(Player)
+        .filter(Player.arena_id == arena.id, Player.username == player_nickname)
+        .first()
+    )
+
+    if existing:
+        return {
+            "arena_id": arena.id,
+            "arena_name": arena.arena_name,
+            "access_code": arena.access_code,
+            "player_id": existing.id,
+            "player_username": existing.username,
+            "organization_id": existing.organization_id,
+            "total_players": db.query(Player).filter(Player.arena_id == arena.id).count(),
+        }
+
+    new_player = Player(
+        arena_id=arena.id,
+        organization_id=org_id,
+        arena_access_code=access_code_int,
+        username=player_nickname,
+        status="joined",
+    )
+
+    db.add(new_player)
+    try:
+        db.commit()
+        db.refresh(new_player)
+    except IntegrityError:
+        # race: another request inserted the same (arena_id, username). Roll back and return existing.
+        db.rollback()
+        existing = (
+            db.query(Player)
+            .filter(Player.arena_id == arena.id, Player.username == player_nickname)
+            .first()
+        )
+        if existing:
+            return {
+                "arena_id": arena.id,
+                "arena_name": arena.arena_name,
+                "access_code": arena.access_code,
+                "player_id": existing.id,
+                "player_username": existing.username,
+                "organization_id": existing.organization_id,
+                "total_players": db.query(Player).filter(Player.arena_id == arena.id).count(),
+            }
+        # If still not found, re-raise
+        raise
+
+    return {
+        "arena_id": arena.id,
+        "arena_name": arena.arena_name,
+        "access_code": arena.access_code,
+        "player_id": new_player.id,
+        "player_username": new_player.username,
+        "organization_id": new_player.organization_id,
+        "total_players": db.query(Player).filter(Player.arena_id == arena.id).count(),
+    }

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 from datetime import datetime 
-from sqlalchemy import String, ForeignKey, Integer, func
+from sqlalchemy import String, ForeignKey, Integer, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -25,9 +25,13 @@ class Player(Base):
     
     # Completion tracking
     completed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
-    score: Mapped[int] = mapped_column(default=0)  # Final score
-    answers_submitted: Mapped[int] = mapped_column(default=0)  # Total answers submitted
-    correct_answers: Mapped[int] = mapped_column(default=0)  # Total correct answers
+    score: Mapped[Optional[int]] = mapped_column(default=None, nullable=True)  # Final score
+    answers_submitted: Mapped[Optional[int]] = mapped_column(default=None, nullable=True)  # Total answers submitted
+    correct_answers: Mapped[Optional[int]] = mapped_column(default=None, nullable=True)  # Total correct answers
 
     arena: Mapped["Arena"] = relationship("Arena", back_populates="players")
     organization: Mapped["Organization"] = relationship("Organization")
+    
+    __table_args__ = (
+        UniqueConstraint('arena_id', 'username', name='_arena_nickname_uc'),
+    )
