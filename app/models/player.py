@@ -28,6 +28,7 @@ class Player(Base):
     score: Mapped[Optional[int]] = mapped_column(default=None, nullable=True)  # Final score
     answers_submitted: Mapped[Optional[int]] = mapped_column(default=None, nullable=True)  # Total answers submitted
     correct_answers: Mapped[Optional[int]] = mapped_column(default=None, nullable=True)  # Total correct answers
+    rank: Mapped[Optional[int]] = mapped_column(default=None, nullable=True)  # Player's rank
 
     arena: Mapped["Arena"] = relationship("Arena", back_populates="players")
     organization: Mapped["Organization"] = relationship("Organization")

@@ -12,12 +12,15 @@ class PlayerCreate(BaseModel):
     attempt_date: Optional[datetime] = None
     status: Optional[str] = "joined"
     completed_at: Optional[datetime] = None
-    score: int = 0
-    answers_submitted: int = 0
-    correct_answers: int = 0
+    score: Optional[int] = None
+    answers_submitted: Optional[int] = None
+    correct_answers: Optional[int] = None
 
 
 class PlayerResponse(PlayerCreate):
     id: int
+    rank: Optional[int] = None
+    arena_name: Optional[str] = None
+    total_players: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)

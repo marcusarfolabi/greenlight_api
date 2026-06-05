@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -23,6 +24,7 @@ from app.models.user import User
 from app.schemas.user import AuthContext
 from app.services.token_service import TokenService
 from app.services.ai_question_service import AIQuestionGenerationService
+from app.schemas.player import PlayerResponse
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -418,7 +420,6 @@ async def get_token_usage_logs(
 
     return [ArenaTokenUsageLogResponse.model_validate(log) for log in logs]
 
-# validate arena access code and accept player nickname for players to be in the lobby on the FE
 @router.post("/validate-access-code")
 async def validate_access_code(
     access_code: str = Body(...),
@@ -506,3 +507,115 @@ async def validate_access_code(
         "organization_id": new_player.organization_id,
         "total_players": db.query(Player).filter(Player.arena_id == arena.id).count(),
     }
+
+@router.get("/organization/players", response_model=list[PlayerResponse])
+async def get_organization_players(
+    offset: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None,
+    current_user: AuthContext = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[PlayerResponse]:
+    """Get list of players across all arenas in the user's organization"""
+    user = db.query(User).filter(User.id == current_user.user_id).first()
+    if not user or not user.owned_organization:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Organization required")
+
+    org_id = user.owned_organization.id
+
+    # Count players for pagination
+    total_players = db.query(Player).filter(Player.organization_id == org_id).count()
+
+    query = (
+        db.query(Player, Arena.arena_name)
+        .outerjoin(Arena, Player.arena_id == Arena.id)
+        .filter(Player.organization_id == org_id)
+    )
+
+    if search:
+        pattern = f"%{search.lower()}%"
+        query = query.filter(
+            func.lower(Player.username).like(pattern) | func.lower(Arena.arena_name).like(pattern)
+        )
+
+    rows = query.offset(offset).limit(limit).all()
+
+    result: list[PlayerResponse] = []
+    for row in rows:
+        # row is (Player, arena_name)
+        p, arena_name = row
+        result.append(
+            PlayerResponse.model_validate(
+                {
+                    "id": p.id,
+                    "arena_id": p.arena_id,
+                    "organization_id": p.organization_id,
+                    "arena_access_code": p.arena_access_code,
+                    "username": p.username,
+                    "attempt_date": p.attempt_date,
+                    "status": p.status,
+                    "completed_at": p.completed_at,
+                    "score": p.score,
+                    "answers_submitted": p.answers_submitted,
+                    "correct_answers": p.correct_answers,
+                    "rank": getattr(p, "rank", None),
+                    "arena_name": arena_name,
+                    "total_players": total_players,
+                }
+            )
+        )
+
+    return result
+
+@router.get("/{arena_id}/players", response_model=list[PlayerResponse])
+async def get_arena_players(
+    arena_id: int,
+    offset: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> list[PlayerResponse]:
+    """Get list of players in the arena lobby"""
+    arena = db.query(Arena).filter(Arena.id == arena_id).first()
+    if not arena:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Arena not found")
+
+    # Base query for players in arena
+    query = db.query(Player).filter(Player.arena_id == arena_id)
+    total_players = query.count()  # Get total count for pagination
+
+    if search:
+        # case-insensitive search across player username and arena name
+        pattern = f"%{search.lower()}%"
+        query = db.query(Player).outerjoin(Arena, Player.arena_id == Arena.id).filter(
+            func.lower(Player.username).like(pattern) | func.lower(Arena.arena_name).like(pattern)
+        )
+
+    players = query.offset(offset).limit(limit).all()
+
+    result: list[PlayerResponse] = []
+    for p in players:
+        result.append(
+            PlayerResponse.model_validate(
+                {
+                    "id": p.id,
+                    "arena_id": p.arena_id,
+                    "organization_id": p.organization_id,
+                    "arena_access_code": p.arena_access_code,
+                    "username": p.username,
+                    "attempt_date": p.attempt_date,
+                    "status": p.status,
+                    "completed_at": p.completed_at,
+                    "score": p.score,
+                    "answers_submitted": p.answers_submitted,
+                    "correct_answers": p.correct_answers,
+                    "rank": getattr(p, "rank", None),
+                    "arena_name": getattr(arena, "arena_name", None), 
+                    "total_players": total_players,
+                }
+            )
+        )
+
+    return result
+    
+    
