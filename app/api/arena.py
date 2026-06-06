@@ -235,6 +235,13 @@ async def get_arena(
             status_code=status.HTTP_404_NOT_FOUND, detail="Arena not found"
         )
 
+    # Validate access_code is set
+    if arena.access_code is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Arena access code is not set",
+        )
+
     # Check permissions - allow if creator or public
     if arena.creator_id != current_user.user_id and not arena.is_public:
         raise HTTPException(
@@ -270,6 +277,7 @@ async def get_arena(
         arena_name=arena.arena_name,
         category=arena.category,
         is_public=arena.is_public,
+        access_code=arena.access_code,
         questions=[QuestionResponse.model_validate(q) for q in arena.questions], # Convert questions too!
         creator_id=arena.creator_id,
         creator_organization_id=arena.creator_organization_id,
@@ -403,6 +411,7 @@ async def delete_arena(
     logger.info(f"Arena {arena_id} deleted by user {current_user.user_id}")
 
     return {"message": "Arena deleted successfully"}
+
 
 
 @router.get("/tokens/usage")
@@ -755,6 +764,7 @@ async def get_lobby_info(
         players_list.append({
             "id": p.id,
             "username": p.username,
+            "joined_at": p.attempt_date.isoformat() if p.attempt_date else None,
         })
 
     total_players = len(players_list)
@@ -770,6 +780,62 @@ async def get_lobby_info(
             
         }
     )
+
+@router.post("/{arena_id}/start-countdown")
+async def start_arena_countdown(
+    arena_id: int,
+    countdown_seconds: int = Body(default=30, embed=True),
+    current_user: AuthContext = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Host endpoint to start countdown for an arena.
+    This broadcasts countdown to all connected WebSocket clients for this arena.
+    """
+    arena = db.query(Arena).filter(Arena.id == arena_id).first()
+
+    if not arena:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Arena not found"
+        )
+
+    # Verify host authorization
+    if arena.creator_id != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the arena host can start the countdown",
+        )
+
+    # Validate countdown duration
+    if countdown_seconds < 5 or countdown_seconds > 300:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Countdown must be between 5 and 300 seconds",
+        )
+
+    # Get the access code for this arena and validate it's not None
+    if arena.access_code is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Arena access code is not set",
+        )
+    access_code = str(arena.access_code)
+
+    # Define the broadcast function
+    async def _countdown_broadcast(ac: str, remaining: int):
+        await ws_manager.broadcast(ac, {"type": "countdown", "payload": {"countdown": remaining}})
+
+    # Start the countdown (this will broadcast countdown messages and game_start when done)
+    ws_manager.start_countdown(access_code, countdown_seconds, _countdown_broadcast)
+
+    logger.info(f"Countdown started for arena {arena_id} by user {current_user.user_id} with {countdown_seconds} seconds")
+
+    return {
+        "message": "Countdown started",
+        "arena_id": arena_id,
+        "access_code": access_code,
+        "countdown_seconds": countdown_seconds,
+    }
 
 
 
@@ -826,6 +892,26 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                         ws_manager.start_countdown(str(arena.access_code), seconds, _countdown_broadcast)
                     except Exception:
                         logger.exception("Error handling host_ready message")
+                
+                elif msg_type == "question_display":
+                    # Broadcast question to all connected clients
+                    try:
+                        await ws_manager.broadcast(str(arena.access_code), {
+                            "type": "question_display",
+                            "payload": data.get("payload", {})
+                        })
+                    except Exception:
+                        logger.exception("Error broadcasting question")
+                
+                elif msg_type == "hide_question":
+                    # Hide question from all connected clients
+                    try:
+                        await ws_manager.broadcast(str(arena.access_code), {
+                            "type": "hide_question",
+                            "payload": {}
+                        })
+                    except Exception:
+                        logger.exception("Error hiding question")
 
         finally:
             # Proper cleanup of database generator

@@ -29,6 +29,7 @@ class PlayerResponse(PlayerCreate):
 class LobbyPlayer(BaseModel):
     id: Optional[int] = None
     username: Optional[str] = None
+    joined_at: Optional[datetime] = None
 
 
 class LobbyResponse(BaseModel):

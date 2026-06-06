@@ -90,6 +90,7 @@ class ArenaResponse(BaseModel):
     is_public: bool
     creator_id: int
     creator_organization_id: Optional[int] = None
+    access_code: int
     created_at: datetime
     updated_at: datetime
     ai_tokens_used: int

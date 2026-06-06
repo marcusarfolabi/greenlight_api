@@ -57,6 +57,10 @@ class ConnectionManager:
                     await broadcast_countdown_coro(access_code, self.timers[access_code])
                 # final broadcast at 0
                 await broadcast_countdown_coro(access_code, 0)
+                
+                # Broadcast game start signal when countdown completes
+                await self.broadcast(access_code, {"type": "game_start", "payload": {}})
+                
             except asyncio.CancelledError:
                 return
 
