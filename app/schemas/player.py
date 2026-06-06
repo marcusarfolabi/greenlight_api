@@ -18,9 +18,25 @@ class PlayerCreate(BaseModel):
 
 
 class PlayerResponse(PlayerCreate):
-    id: int
+    id: Optional[int] = None
     rank: Optional[int] = None
     arena_name: Optional[str] = None
     total_players: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LobbyPlayer(BaseModel):
+    id: Optional[int] = None
+    username: Optional[str] = None
+
+
+class LobbyResponse(BaseModel):
+    players: list[LobbyPlayer]
+    total_players: int
+    lobby_waiting_time: int = 30
+    arena_name: Optional[str] = None
+    arena_access_code: Optional[int] = None
+    
 
     model_config = ConfigDict(from_attributes=True)

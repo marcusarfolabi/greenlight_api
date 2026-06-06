@@ -1,6 +1,7 @@
 import logging
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Body, File, Form, UploadFile, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, Body, File, Form, UploadFile, BackgroundTasks, WebSocket, WebSocketDisconnect
+import asyncio
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -26,9 +27,11 @@ from app.models.user import User
 from app.schemas.user import AuthContext
 from app.services.token_service import TokenService
 from app.services.ai_question_service import AIQuestionGenerationService
-from app.schemas.player import PlayerResponse
+from app.schemas.player import PlayerResponse, LobbyResponse, LobbyPlayer
 from app.services.mail_service import MailService
 from app.services.twilio_service import TwilioService
+from app.services.ws_manager import ws_manager
+from app.core.security import decode_token
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -521,7 +524,7 @@ async def validate_access_code(
         # If still not found, re-raise
         raise
 
-    return {
+    response_payload = {
         "arena_id": arena.id,
         "arena_name": arena.arena_name,
         "access_code": arena.access_code,
@@ -530,6 +533,26 @@ async def validate_access_code(
         "organization_id": new_player.organization_id,
         "total_players": db.query(Player).filter(Player.arena_id == arena.id).count(),
     }
+
+    # Broadcast lobby update to connected websocket clients (fire-and-forget)
+    try:
+        players = db.query(Player).filter(Player.arena_id == arena.id).all()
+        players_list = [{"id": p.id, "username": p.username} for p in players]
+        payload = {
+            "type": "lobby_update",
+            "payload": {
+                "players": players_list,
+                "total_players": len(players_list),
+                "lobby_waiting_time": 30,
+                "arena_name": arena.arena_name,
+                "arena_access_code": arena.access_code,
+            },
+        }
+        asyncio.create_task(ws_manager.broadcast(str(arena.access_code), payload))
+    except Exception:
+        logger.exception("Failed to broadcast lobby update")
+
+    return response_payload
 
 @router.get("/organization/players", response_model=list[PlayerResponse])
 async def get_organization_players(
@@ -711,3 +734,111 @@ async def upload_participants_send_message(
 
     return {"total": len(contacts_list), "queued": queued, "message": "messages queued for background delivery"}
     
+# router api for the participants that have joined the using the particular accesscode of an arena which the FE known as Lobby
+@router.get("/lobby/{access_code}", response_model=LobbyResponse)
+async def get_lobby_info(
+    access_code: str,
+    db: Session = Depends(get_db),
+) -> LobbyResponse:
+    """Get lobby info for a given access code"""
+    arena = db.query(Arena).filter(Arena.access_code == access_code).first()
+
+    if not arena:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Invalid access code"
+        )
+
+    # return a lobby summary with all participants currently in the arena
+    players = db.query(Player).filter(Player.arena_id == arena.id).all()
+    players_list = []
+    for p in players:
+        players_list.append({
+            "id": p.id,
+            "username": p.username,
+        })
+
+    total_players = len(players_list)
+
+    return LobbyResponse.model_validate(
+        {
+            "players": players_list,
+            "total_players": total_players,
+            "lobby_waiting_time": 30,
+            "arena_name": arena.arena_name,
+            "arena_access_code": arena.access_code,
+            "host_id": getattr(arena, "creator_id", None),
+            
+        }
+    )
+
+
+
+@router.websocket("/ws/lobby/{access_code}")
+async def lobby_websocket(websocket: WebSocket, access_code: str):
+    """WebSocket endpoint for real-time lobby updates and shared countdown."""
+    
+    # Accept the connection immediately
+    await websocket.accept()
+    await ws_manager.connect(str(access_code), websocket)
+
+    try:
+        from app.db.session import get_db as _get_db
+        db_gen = _get_db()
+        db = next(db_gen)
+        
+        try:
+            arena = db.query(Arena).filter(Arena.access_code == access_code).first()
+            if not arena:
+                await websocket.close(code=1008)
+                return
+
+            # Fetch players based on arena ID
+            players = db.query(Player).filter(Player.arena_id == arena.id).all()
+            players_list = [{"id": p.id, "username": p.username} for p in players]
+            
+            payload = {
+                "type": "lobby_update",
+                "payload": {
+                    "players": players_list,
+                    "total_players": len(players_list),
+                    "lobby_waiting_time": 30,
+                    "arena_name": arena.arena_name,
+                    "arena_access_code": arena.access_code,
+                },
+            }
+            
+            # Send snapshot to all clients for this access code
+            
+            await ws_manager.broadcast(str(arena.access_code), payload)
+
+            async def _countdown_broadcast(ac, remaining):
+                await ws_manager.broadcast(ac, {"type": "countdown", "payload": {"countdown": remaining}})
+
+            # Listen for incoming messages
+            while True:
+                data = await websocket.receive_json()
+                msg_type = data.get("type")
+                
+                if msg_type == "host_ready":
+                    try:
+                        # Removed the user_id check
+                        seconds = int(data.get("seconds", 30))
+                        ws_manager.start_countdown(str(arena.access_code), seconds, _countdown_broadcast)
+                    except Exception:
+                        logger.exception("Error handling host_ready message")
+
+        finally:
+            # Proper cleanup of database generator
+            try:
+                next(db_gen, None)
+            except StopIteration:
+                pass
+
+    except WebSocketDisconnect:
+        ws_manager.disconnect(str(access_code), websocket)
+    except Exception:
+        ws_manager.disconnect(str(access_code), websocket)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
