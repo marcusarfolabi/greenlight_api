@@ -41,3 +41,36 @@ class LobbyResponse(BaseModel):
     
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PlayerAnswerScoreCreate(BaseModel):
+    player_id: int
+    arena_id: int
+    question_id: int
+    answer_selected: int
+    is_correct: bool
+    time_taken: float
+    question_time_limit: int
+    points_earned: int
+    max_points: int
+
+
+class PlayerAnswerScoreResponse(PlayerAnswerScoreCreate):
+    id: int
+    answered_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PlayerScoreboardResponse(BaseModel):
+    """Player score info for leaderboard display"""
+    player_id: int
+    username: Optional[str] = None
+    total_score: int
+    answers_correct: int
+    answers_total: int
+    accuracy_percentage: float
+    rank: Optional[int] = None
+    last_answered_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)

@@ -2,6 +2,7 @@ import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Body, File, Form, UploadFile, BackgroundTasks, WebSocket, WebSocketDisconnect
 import asyncio
+from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -27,7 +28,7 @@ from app.models.user import User
 from app.schemas.user import AuthContext
 from app.services.token_service import TokenService
 from app.services.ai_question_service import AIQuestionGenerationService
-from app.schemas.player import PlayerResponse, LobbyResponse, LobbyPlayer
+from app.schemas.player import PlayerResponse, LobbyResponse, LobbyPlayer, PlayerScoreboardResponse
 from app.services.mail_service import MailService
 from app.services.twilio_service import TwilioService
 from app.services.ws_manager import ws_manager
@@ -295,7 +296,7 @@ async def update_arena(
     current_user: AuthContext = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Update arena details"""
+    """Update arena details with PATCH-style question merging (no deletes with foreign keys)"""
     arena = db.query(Arena).filter(Arena.id == arena_id).first()
 
     if not arena:
@@ -317,37 +318,51 @@ async def update_arena(
     if data.is_public is not None:
         arena.is_public = data.is_public
 
-    # Replace questions if provided
+    # Merge questions if provided (PATCH style: update existing, add new, delete only if no refs)
     if getattr(data, "questions", None) is not None:
-        # Delete existing questions for the arena
-        db.query(Question).filter(Question.arena_id == arena_id).delete(synchronize_session=False)
-        db.flush()
-
         # Resolve user/org for token accounting
         user = db.query(User).filter(User.id == current_user.user_id).first()
         if not user or not user.owned_organization:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Organization required")
         org = user.owned_organization
 
-        # Calculate total AI tokens for the new questions (only count if AI-generated)
-        total_ai_tokens = 0
         qs = data.questions or []
+        incoming_question_ids = set()  # Track which existing questions are in the update
+        new_ai_tokens = 0  # Only count tokens for truly new questions
+
+        # Process incoming questions: update existing, insert new
         for q in qs:
+            q_id = getattr(q, "id", None)
+            
+            # Check if this question ID exists in the database for this arena
+            if q_id:
+                existing_q = db.query(Question).filter(
+                    Question.id == q_id,
+                    Question.arena_id == arena_id
+                ).first()
+                
+                if existing_q:
+                    # Update existing question (preserve AI token cost from creation)
+                    incoming_question_ids.add(q_id)
+                    existing_q.prompt_text = q.prompt_text
+                    existing_q.time_limit_seconds = q.time_limit_seconds
+                    existing_q.correct_option_index = q.correct_option_index
+                    existing_q.point_value = q.point_value
+                    existing_q.status = q.status or "ready"
+                    existing_q.options_json = [{"text": opt_text} for opt_text in q.options]
+                    # Note: Don't modify ai_tokens_cost or is_ai_generated - preserve original values
+                    logger.info(f"Updated existing question {q_id} in arena {arena_id}")
+                    continue
+            
+            # This is a new question (no ID or ID doesn't exist in DB)
             token_cost = 0
             if org.use_ai_for_arenas and getattr(q, "is_ai_generated", False):
-                token_cost = TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), use_ai_generation=True)
-            total_ai_tokens += token_cost
-
-        # Attempt atomic debit of tokens if organization uses AI
-        if org.use_ai_for_arenas and total_ai_tokens > 0:
-            if not TokenService.deduct_tokens(db, org.id, total_ai_tokens):
-                raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient tokens")
-
-        # Create new question rows and attach computed token costs
-        for q in qs:
-            token_cost = 0
-            if org.use_ai_for_arenas and getattr(q, "is_ai_generated", False):
-                token_cost = TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), use_ai_generation=True)
+                token_cost = TokenService.calculate_question_cost(
+                    len(q.prompt_text), 
+                    len(q.options), 
+                    use_ai_generation=True
+                )
+                new_ai_tokens += token_cost
 
             new_q = Question(
                 arena_id=arena.id,
@@ -357,30 +372,45 @@ async def update_arena(
                 point_value=q.point_value,
                 status=q.status or "ready",
                 ai_tokens_cost=token_cost,
-                is_ai_generated=q.is_ai_generated,
+                is_ai_generated=getattr(q, "is_ai_generated", False),
                 options_json=[{"text": opt_text} for opt_text in q.options],
             )
             db.add(new_q)
 
+        # Deduct tokens only for NEW AI-generated questions
+        if org.use_ai_for_arenas and new_ai_tokens > 0:
+            if not TokenService.deduct_tokens(db, org.id, new_ai_tokens):
+                raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient tokens")
+
+        db.flush()
+ 
+        questions_to_consider_deleting = (
+            db.query(Question)
+            .filter(Question.arena_id == arena_id, ~Question.id.in_(incoming_question_ids))
+            .all()
+        )
+        
+        for q_to_delete in questions_to_consider_deleting: 
+            logger.info(f"Question {q_to_delete.id} not in update request, keeping for data integrity")
+
         db.flush()
 
-        # Add consumed tokens to arena's running total (don't overwrite existing)
-        if org.use_ai_for_arenas and total_ai_tokens > 0:
-            arena.ai_tokens_used = (arena.ai_tokens_used or 0) + total_ai_tokens
+        if org.use_ai_for_arenas and new_ai_tokens > 0:
+            arena.ai_tokens_used = (arena.ai_tokens_used or 0) + new_ai_tokens
 
             # Log token usage for this update
             TokenService.log_token_usage(
                 db=db,
                 arena_id=arena.id,
                 organization_id=org.id,
-                tokens_used=total_ai_tokens,
+                tokens_used=new_ai_tokens,
                 operation="arena_question_update",
             )
 
     db.commit()
     db.refresh(arena)
 
-    logger.info(f"Arena {arena_id} updated by user {current_user.user_id}")
+    logger.info(f"Arena {arena_id} updated by host {current_user.user_id}")
 
     return arena
 
@@ -838,6 +868,62 @@ async def start_arena_countdown(
     }
 
 
+@router.get("/{arena_id}/scoreboard", response_model=list[PlayerScoreboardResponse])
+async def get_arena_scoreboard(
+    arena_id: int,
+    db: Session = Depends(get_db),
+):
+    """Get current scoreboard for an arena with all player scores ranked"""
+    from app.models.player import PlayerAnswerScore
+    from sqlalchemy import desc
+    
+    arena = db.query(Arena).filter(Arena.id == arena_id).first()
+    if not arena:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Arena not found"
+        )
+    
+    # Get all players for this arena with their scores aggregated
+    players = db.query(Player).filter(Player.arena_id == arena_id).all()
+    
+    scoreboard_data = []
+    for player in players:
+        # Get all answers for this player in this arena
+        answers = db.query(PlayerAnswerScore).filter(
+            PlayerAnswerScore.player_id == player.id,
+            PlayerAnswerScore.arena_id == arena_id
+        ).all()
+        
+        total_score = sum(a.points_earned for a in answers)
+        correct_count = sum(1 for a in answers if a.is_correct)
+        total_answers = len(answers)
+        accuracy = (correct_count / total_answers * 100) if total_answers > 0 else 0
+        last_answered = max([a.answered_at for a in answers], default=None) if answers else None
+        
+        scoreboard_data.append({
+            "player_id": player.id,
+            "username": player.username,
+            "total_score": total_score,
+            "answers_correct": correct_count,
+            "answers_total": total_answers,
+            "accuracy_percentage": round(accuracy, 2),
+            "last_answered_at": last_answered,
+            "rank": None,  # Will be set after sorting
+        })
+    
+    # Sort by total score descending, then by accuracy descending, then by answer time ascending
+    scoreboard_data.sort(
+        key=lambda x: (-x["total_score"], -x["accuracy_percentage"], x["last_answered_at"] or datetime.max),
+    )
+    
+    # Add ranks after sorting
+    for idx, entry in enumerate(scoreboard_data, 1):
+        entry["rank"] = idx
+    
+    # Convert to response models
+    return [PlayerScoreboardResponse.model_validate(entry) for entry in scoreboard_data]
+
+
 
 @router.websocket("/ws/lobby/{access_code}")
 async def lobby_websocket(websocket: WebSocket, access_code: str):
@@ -846,6 +932,9 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
     # Accept the connection immediately
     await websocket.accept()
     await ws_manager.connect(str(access_code), websocket)
+
+    # Track player info for this connection
+    player_info: dict = {"player_id": 0, "player_name": "", "arena_id": 0}
 
     try:
         from app.db.session import get_db as _get_db
@@ -857,6 +946,8 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
             if not arena:
                 await websocket.close(code=1008)
                 return
+            
+            player_info["arena_id"] = arena.id
 
             # Fetch players based on arena ID
             players = db.query(Player).filter(Player.arena_id == arena.id).all()
@@ -885,7 +976,27 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                 data = await websocket.receive_json()
                 msg_type = data.get("type")
                 
-                if msg_type == "host_ready":
+                if msg_type == "register_player":
+                    # Player identifies themselves
+                    try:
+                        payload = data.get("payload", {})
+                        player_name = payload.get("player_name")
+                        
+                        if player_name:
+                            # Find player in database by name and arena
+                            player = db.query(Player).filter(
+                                Player.arena_id == arena.id,
+                                Player.username == player_name
+                            ).first()
+                            
+                            if player:
+                                player_info["player_id"] = player.id
+                                player_info["player_name"] = player_name
+                                logger.info(f"Player {player_name} (ID: {player.id}) registered in arena {arena.id}")
+                    except Exception:
+                        logger.exception("Error handling player registration")
+                
+                elif msg_type == "host_ready":
                     try:
                         # Removed the user_id check
                         seconds = int(data.get("seconds", 30))
@@ -902,6 +1013,62 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                         })
                     except Exception:
                         logger.exception("Error broadcasting question")
+                
+                elif msg_type == "player_answer":
+                    # Handle player answer submission with timing-based scoring
+                    try:
+                        from app.models.player import PlayerAnswerScore
+                        from app.models.arena import Question
+                        
+                        payload = data.get("payload", {})
+                        question_id = payload.get("question_id")
+                        answer_selected = payload.get("answer_selected")
+                        is_correct = payload.get("is_correct")
+                        time_taken = payload.get("time_taken", 0)
+                        question_time_limit = payload.get("question_time_limit", 0)
+                        max_points = payload.get("max_points", 0)
+                        
+                        # Calculate score using the formula
+                        points_earned = PlayerAnswerScore.calculate_score(
+                            time_taken=time_taken,
+                            question_time_limit=question_time_limit,
+                            max_points=max_points,
+                            is_correct=is_correct
+                        )
+                        
+                        # Save answer to database if player is registered
+                        if player_info["player_id"] and player_info["arena_id"]:
+                            answer_score = PlayerAnswerScore(
+                                player_id=player_info["player_id"],
+                                arena_id=player_info["arena_id"],
+                                question_id=question_id,
+                                answer_selected=answer_selected,
+                                is_correct=is_correct,
+                                time_taken=time_taken,
+                                question_time_limit=question_time_limit,
+                                points_earned=points_earned,
+                                max_points=max_points,
+                            )
+                            db.add(answer_score)
+                            db.commit()
+                            logger.info(f"Saved answer for player {player_info['player_name']} on Q{question_id}: {points_earned} points")
+                        
+                        # Broadcast score update to all players
+                        await ws_manager.broadcast(str(arena.access_code), {
+                            "type": "player_score_update",
+                            "payload": {
+                                "question_id": question_id,
+                                "player_name": player_info["player_name"],
+                                "answer_selected": answer_selected,
+                                "is_correct": is_correct,
+                                "time_taken": time_taken,
+                                "points_earned": points_earned,
+                            }
+                        })
+                        
+                        logger.info(f"Player {player_info['player_name']} answered Q{question_id} correctly={is_correct} in {time_taken}s, earned {points_earned} points")
+                    except Exception:
+                        logger.exception("Error processing player answer")
                 
                 elif msg_type == "hide_question":
                     # Hide question from all connected clients
