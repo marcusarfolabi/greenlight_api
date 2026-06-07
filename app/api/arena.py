@@ -704,8 +704,8 @@ async def get_arena_players(
     return result
     
 
-@router.post("/{arena_id}/participants/upload")
-async def upload_participants_send_message(
+@router.post("/{arena_id}/participants/message")
+async def send_participants_message(
     arena_id: int,
     background_tasks: BackgroundTasks,
     channel: str = Form(...),
@@ -773,7 +773,6 @@ async def upload_participants_send_message(
 
     return {"total": len(contacts_list), "queued": queued, "message": "messages queued for background delivery"}
     
-# router api for the participants that have joined the using the particular accesscode of an arena which the FE known as Lobby
 @router.get("/lobby/{access_code}", response_model=LobbyResponse)
 async def get_lobby_info(
     access_code: str,
@@ -869,13 +868,20 @@ async def start_arena_countdown(
 
 
 @router.get("/{arena_id}/scoreboard", response_model=list[PlayerScoreboardResponse])
-async def get_arena_scoreboard(
+async def get_arena_scoreboard_endpoint(
     arena_id: int,
     db: Session = Depends(get_db),
 ):
-    """Get current scoreboard for an arena with all player scores ranked"""
+    """Get live scoreboard for arena with player rankings"""
+    return get_arena_scoreboard(arena_id, db)
+
+
+def get_arena_scoreboard(
+    arena_id: int,
+    db: Session,
+):
+    """Helper function to calculate scoreboard for an arena with all player scores ranked"""
     from app.models.player import PlayerAnswerScore
-    from sqlalchemy import desc
     
     arena = db.query(Arena).filter(Arena.id == arena_id).first()
     if not arena:
@@ -922,7 +928,6 @@ async def get_arena_scoreboard(
     
     # Convert to response models
     return [PlayerScoreboardResponse.model_validate(entry) for entry in scoreboard_data]
-
 
 
 @router.websocket("/ws/lobby/{access_code}")
@@ -1079,6 +1084,20 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                         })
                     except Exception:
                         logger.exception("Error hiding question")
+                
+                elif msg_type == "question_timeout":
+                    # Question timed out - broadcast live scoreboard to all players
+                    try:
+                        scoreboard = get_arena_scoreboard(arena.id, db)
+                        await ws_manager.broadcast(str(arena.access_code), {
+                            "type": "scoreboard_update",
+                            "payload": {
+                                "scoreboard": [entry.model_dump() for entry in scoreboard]
+                            }
+                        })
+                        logger.info(f"Broadcasted scoreboard for arena {arena.id} due to question timeout")
+                    except Exception:
+                        logger.exception("Error broadcasting scoreboard on timeout")
 
         finally:
             # Proper cleanup of database generator
