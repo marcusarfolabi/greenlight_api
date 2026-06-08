@@ -16,7 +16,7 @@ class SubscriptionService:
     def create_subscription(
         db: Session,
         organization_id: int,
-        plan_id: int,
+        plan_id: int, 
         stripe_subscription_id: Optional[str] = None,
         stripe_customer_id: Optional[str] = None,
         period_start: Optional[datetime] = None,
@@ -73,9 +73,9 @@ class SubscriptionService:
             existing.canceled_at = period_start
             logger.info(f"Canceled existing subscription {existing.id} for org {organization_id}")
         
-        # Allocate AI tokens from the plan to the organization
-        organization.capped_tokens = plan.ai_tokens
-        logger.info(f"Allocated {plan.ai_tokens} tokens to organization {organization_id}")
+        # Allocate AI tokens from the plan to the organization (add to existing)
+        organization.capped_tokens = (organization.capped_tokens or 0) + plan.ai_tokens
+        logger.info(f"Added {plan.ai_tokens} tokens to organization {organization_id} (total: {organization.capped_tokens})")
         
         # Create the new subscription
         subscription = Subscription(

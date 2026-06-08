@@ -53,7 +53,7 @@ async def login(
         httponly=True,
         secure=is_production,
         samesite="lax",        
-        domain=".webshoptechnology.us" if is_production else None,
+        domain=".webshoptechnology.us" if is_production else "localhost",
         max_age=21600,
         path="/"
     )
