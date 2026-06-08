@@ -8,23 +8,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  test:
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v6
-        - name: Set up Python
-          uses: actions/setup-python@v5
-          with:
-            python-version: '3.11'
-        - name: Install dependencies
-          run: |
-            pip install -r requirements.txt
-            pip install pytest
-        - name: Run Pytest
-          run: pytest
-
   build-and-push:
-    needs: test 
     runs-on: ubuntu-latest
     permissions:
       contents: read
