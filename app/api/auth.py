@@ -50,10 +50,10 @@ async def login(
         key="auth_token",
         value=access_token,
         httponly=True,
-        secure=False, 
+        secure=True, 
         samesite="lax",        
         # domain="localhost",     
-        max_age=3600,
+        max_age=21600,
         path="/"
     )
     response_data = {
