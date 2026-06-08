@@ -20,6 +20,7 @@ from app.schemas.subscription import (
 )
 from app.core.security import get_current_user
 from app.schemas.user import AuthContext
+from app.services.subscription_service import SubscriptionService
 
 
 router = APIRouter()
@@ -100,44 +101,14 @@ async def create_subscription(
             detail="Subscription plan not found"
         )
     
-    # Cancel any existing active subscriptions
-    existing = db.query(Subscription).filter(
-        Subscription.organization_id == auth.org_id,
-        Subscription.status == "active"
-    ).first()
-    
-    period_start = datetime.utcnow()
-
-    if plan.interval == "year":
-        period_end = period_start + timedelta(days=365)
-    else:
-        period_end = period_start + timedelta(days=30)
-
-    # 2. Handle existing subscription
-    existing = db.query(Subscription).filter(
-        Subscription.organization_id == auth.org_id,
-        Subscription.status == "active"
-    ).first()
-
-    if existing:
-        existing.status = "canceled"
-        existing.canceled_at = period_start # Use the same timestamp
-
-    # 3. Create the new subscription object reliably
-    subscription = Subscription(
+    # Create subscription using service (handles token allocation)
+    subscription = SubscriptionService.create_subscription(
+        db=db,
         organization_id=auth.org_id,
         plan_id=subscription_data.plan_id,
         stripe_subscription_id=subscription_data.stripe_subscription_id,
         stripe_customer_id=subscription_data.stripe_customer_id,
-        status=subscription_data.status,
-        current_period_start=period_start,
-        current_period_end=period_end,
-    ) 
-        
-    
-    db.add(subscription)
-    db.commit()
-    db.refresh(subscription)
+    )
     
     return subscription
 
@@ -288,41 +259,16 @@ async def confirm_payment(
                 detail=f"Payment not completed. Status: {payment_intent.status}"
             )
         
-        stripe_customer_id = payment_intent.customer
+        stripe_customer_id = str(payment_intent.customer) if payment_intent.customer else None
         
-        existing = db.query(Subscription).filter(
-            Subscription.organization_id == auth.org_id,
-            Subscription.status == "active"
-        ).first()
-        
-        if existing:
-            existing.status = "canceled"
-            existing.canceled_at = datetime.utcnow()
-        
-        period_start = datetime.utcnow()
-        if plan.interval == "year":
-            period_end = period_start + timedelta(days=365)
-        else:  # Default to month
-            period_end = period_start + timedelta(days=30)
-            
-        # Create the record in the capped_tokens in the organization model of the current user
-        organization.capped_tokens = plan.ai_tokens
-        db.commit()
-        
-        # Create subscription in database
-        subscription = Subscription(
+        # Create subscription using service (handles token allocation and canceling old subscriptions)
+        subscription = SubscriptionService.create_subscription(
+            db=db,
             organization_id=auth.org_id,
             plan_id=request.plan_id,
-            stripe_customer_id=stripe_customer_id,
             stripe_subscription_id=payment_intent.id,
-            current_period_start=period_start,
-            current_period_end=period_end,
-            status="active"
+            stripe_customer_id=stripe_customer_id,
         )
-        
-        db.add(subscription)
-        db.commit()
-        db.refresh(subscription)
         
         logger.info(f"Subscription created for org {auth.org_id} on plan {request.plan_id}")
         
