@@ -7,6 +7,8 @@ venv/
 .venv/
 __pycache__/
 node_modules/
+*.pyc
+cache/
 
 # Exclude build artifacts and logs
 *.log

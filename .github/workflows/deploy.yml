@@ -32,9 +32,9 @@ jobs:
         with:
           context: .
           push: true 
+          tags: ghcr.io/greenlightquiz/backend:latest 
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: ghcr.io/greenlightquiz/backend:latest 
           build-args: |
             MY_ENV_VAR=${{ secrets.MY_ENV_VAR }}
 
