@@ -32,6 +32,7 @@ class TokenService:
                 "used_tokens": 0,
                 "remaining_tokens": 0,
                 "plan_name": "None",
+                "plan_type": "None",
                 "has_tokens": False
             }
 
