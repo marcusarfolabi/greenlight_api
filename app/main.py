@@ -111,8 +111,8 @@ async def get_open_api_endpoint(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_origin_regex=r"https?://([a-z0-9-]+\.)?localhost:3000",
+    # allow_origins=settings.CORS_ORIGINS,
+    allow_origins=["http://localhost:3000", "https://greenlight-quiz.vercel.app"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

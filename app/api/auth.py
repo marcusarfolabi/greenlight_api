@@ -52,7 +52,7 @@ async def login(
         httponly=True,
         secure=False, 
         samesite="lax",        
-        domain="localhost",     
+        # domain="localhost",     
         max_age=3600,
         path="/"
     )
