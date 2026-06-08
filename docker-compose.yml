@@ -27,7 +27,6 @@ services:
     image: ghcr.io/greenlightquiz/backend:latest
     container_name: greenlight_api
     restart: unless-stopped
-    working_dir: /var/www/greenlight
     env_file:
       - .env.docker
     ports:
