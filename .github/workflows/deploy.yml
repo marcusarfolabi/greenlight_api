@@ -19,7 +19,7 @@ jobs:
 
       - name: Create dummy env file
         run: touch .env.docker
-        
+
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -56,4 +56,4 @@ jobs:
             echo "${{ secrets.G_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker pull ghcr.io/greenlightquiz/backend:latest
             docker compose up -d --force-recreate greenlight_api
-            docker image prune -f
+            docker system prune -af
