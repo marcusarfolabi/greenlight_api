@@ -131,5 +131,5 @@ class OrganizationService:
                 for transaction in transactions
             ],
         }
- 
+
 organization_service = OrganizationService()

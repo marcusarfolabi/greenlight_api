@@ -60,6 +60,14 @@ async def get_organization_subscription(
     
 ):
     """Get the current subscription for an organization"""
+    
+    # Verify user has a valid organization
+    if not auth.org_id or auth.org_id == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User must belong to an organization to view subscriptions"
+        )
+    
     subscription = db.query(Subscription).filter(
         Subscription.organization_id == auth.org_id,
         Subscription.status == "active"
@@ -81,6 +89,13 @@ async def create_subscription(
     auth: AuthContext = Depends(get_current_user)
 ):
     """Create a new subscription for an organization"""
+    
+    # Verify user has a valid organization
+    if not auth.org_id or auth.org_id == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User must belong to an organization to create a subscription"
+        )
     
     # Verify plan exists
     plan = db.query(SubscriptionPlan).filter(
@@ -142,6 +157,13 @@ async def create_payment_intent(
     auth: AuthContext = Depends(get_current_user)
 ):
     """Create a Stripe Payment Intent for embedded payment element"""
+    
+    # Verify user has a valid organization
+    if not auth.org_id or auth.org_id == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User must belong to an organization to create a payment intent"
+        )
     
     # Verify plan exists
     plan = db.query(SubscriptionPlan).filter(
@@ -234,6 +256,13 @@ async def confirm_payment(
     auth: AuthContext = Depends(get_current_user)
 ):
     """Confirm payment and create subscription after successful payment"""
+    
+    # Verify user has a valid organization
+    if not auth.org_id or auth.org_id == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User must belong to an organization to confirm payment"
+        )
     
     # Verify plan exists
     plan = db.query(SubscriptionPlan).filter(
