@@ -1,15 +1,22 @@
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: greenlight_postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    env_file:
+      - .env.docker
     environment:
       POSTGRES_USER: greenlight      
       POSTGRES_PASSWORD: greenlight  
       POSTGRES_DB: greenlight_db
+    deploy:
+      resources:
+        limits:
+          memory: 128M
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U greenlight -d greenlight_db"]
       interval: 10s
@@ -17,20 +24,18 @@ services:
       retries: 5
 
   greenlight_api:
-    build: ./
+    image: ghcr.io/greenlightquiz/backend:latest
     container_name: greenlight_api
+    restart: unless-stopped
+    working_dir: /var/www/greenlight
     env_file:
       - .env.docker
-    environment:
-      DATABASE_URL: postgresql://greenlight:greenlight@postgres:5432/greenlight_db
-      PORT: 8000 
-      PYTHONDONTWRITEBYTECODE: 1
-    volumes:
-      - .:/app
-      - ./cache:/app/cache
     ports:
-      - "8000:8000"
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - "127.0.0.1:8000:8000"
+    deploy:
+      resources:
+        limits:
+          memory: 200M
     depends_on:
       postgres:
         condition: service_healthy
