@@ -44,9 +44,9 @@ async def startup_event():
     logger.info("Initializing database and running seeders...")
     try:
         Base.metadata.create_all(bind=engine)
-        seed_superadmin()
+        # seed_superadmin()
         # seed_subscription_plans()
-        logger.info("Database initialization and seeding complete.")
+        # logger.info("Database initialization and seeding complete.")
     except OperationalError as e:
         logger.error(
             "Database connection failed on startup. "
@@ -118,7 +118,7 @@ app.add_middleware(
     allow_headers=["*"],
 ) 
 
-app.include_router(api_router, prefix="/v1")
+app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
