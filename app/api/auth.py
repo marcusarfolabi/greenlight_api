@@ -43,7 +43,7 @@ async def login(
         "sub": str(user.id),
         "role": user.role,
         "username": user.username,
-        "org_id": org_id
+        "org_id": org_id if org_id else None
     }
     access_token = create_access_token(data=token_data)
     is_production = os.getenv("ENVIRONMENT") == "production"
@@ -64,7 +64,7 @@ async def login(
             "email": user.email,
             "role": user.role,
             "hasOrg": hasOrg,
-            "organization_id": UserService.get_user_org_id(db, user.id) if hasOrg else None
+            "org_id": org_id
         }
     }
     

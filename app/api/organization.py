@@ -37,7 +37,6 @@ async def setup_user_organization(
             detail="User account not found."
         )
     # print it role
-    print(f"DEBUG: User role: {auth.role}")
     if auth.role != UserRole.HOST.value:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
