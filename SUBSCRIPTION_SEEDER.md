@@ -26,6 +26,7 @@ Creates three subscription plans in Stripe and stores IDs in database:
 
 ```bash
 cd backend
+docker exec -it greenlight_api sh 
 python app/scripts/subscription_seeder.py
 ```
 

@@ -44,7 +44,7 @@ async def startup_event():
     logger.info("Initializing database and running seeders...")
     try:
         Base.metadata.create_all(bind=engine)
-        # seed_superadmin()
+        seed_superadmin()
         # seed_subscription_plans()
         logger.info("Database initialization and seeding complete.")
     except OperationalError as e:
@@ -90,7 +90,7 @@ async def get_swagger_documentation(
 ):
     return get_swagger_ui_html(
         openapi_url="/openapi.json",
-        title="Falcon Omni-Connect API",
+        title="Green Light Quiz API",
         swagger_ui_parameters={
             "tryItOutEnabled": True,
             "persistAuthorization": True
