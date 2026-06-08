@@ -1,6 +1,5 @@
 FROM python:3.11-slim
 
-# 1. Use a neutral workspace folder name
 WORKDIR /workspace
 
 ENV PYTHONDONTWRITEBYTECODE 1
@@ -16,10 +15,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# 2. This copies your local 'app' folder into '/workspace/app'
 COPY ./app ./app
 
 COPY .env.docker . 
+
+RUN mkdir -p /app/cache
 
 # 3. Point Uvicorn back to app.main:app
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
