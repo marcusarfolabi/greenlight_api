@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     
     GOOGLE_CLIENT_ID: str = ""   
     GOOGLE_CLIENT_SECRET: Optional[str] = None
-    ENVIRONMENT: str = "localhost"
+    ENVIRONMENT: str = "development"
     
     CORS_ORIGINS: List[str] = ["*"]
     RESEND_API_KEY: str = ""
@@ -38,8 +38,8 @@ class Settings(BaseSettings):
 
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
-    STRIPE_CONNECT_RETURN_URL: str = "http://localhost:3000/dashboard/settings/payouts?stripe=return"
-    STRIPE_CONNECT_REFRESH_URL: str = "http://localhost:3000/dashboard/settings/payouts?stripe=refresh"
+    STRIPE_CONNECT_RETURN_URL: str = ""
+    STRIPE_CONNECT_REFRESH_URL: str = ""
     
     GEMINI_API_KEY: str = ""
     
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     TWILIO_FROM_NUMBER: str = ""
 
     model_config = SettingsConfigDict(
-        env_file=(".env", ".env.docker"),
+        env_file=(".env.docker"),
         env_file_encoding="utf-8",
         extra="ignore"
     )

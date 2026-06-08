@@ -112,7 +112,7 @@ async def get_open_api_endpoint(
 app.add_middleware(
     CORSMiddleware,
     # allow_origins=settings.CORS_ORIGINS,
-    allow_origins=["http://localhost:3000", "https://webshoptechnology.us", "https://greenlight-quiz.vercel.app"],  
+    allow_origins=["http://localhost:3000", "https://app.webshoptechnology.us", "https://greenlight-quiz.vercel.app"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -126,12 +126,12 @@ async def root():
         with engine.connect() as conn:
             return {
                 "status": "Greenlight is operational", 
-                "environment": "production",
+                "environment": os.getenv("ENVIRONMENT"),
                 "db_status": "connected"
             }
     except Exception as e:
         return {
             "status": "Greenlight is operational", 
-            "environment": "production",
+            "environment": os.getenv("ENVIRONMENT"),
             "db_status": f"connection failed: {str(e)}"
         }

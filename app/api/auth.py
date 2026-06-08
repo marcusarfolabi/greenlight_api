@@ -1,4 +1,5 @@
 import logging
+import os
 import secrets
 from datetime import datetime, timedelta
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Response, Form
@@ -45,12 +46,12 @@ async def login(
         "org_id": org_id
     }
     access_token = create_access_token(data=token_data)
-    
+    is_production = os.getenv("ENVIRONMENT") == "production"
     response.set_cookie(
         key="auth_token",
         value=access_token,
         httponly=True,
-        secure=True, 
+        secure=is_production,
         samesite="lax",        
         # domain="localhost",     
         max_age=21600,
