@@ -340,9 +340,11 @@ async def reset_password(payload: ResetPasswordRequest, db: Session = Depends(ge
         
 @router.post("/logout")
 async def logout(response: Response):
+    is_production = os.getenv("ENVIRONMENT") == "production"
+    
     response.delete_cookie(
         key="auth_token",
-        path="/",
-        domain=None  
+        path="/", 
+        domain=".webshoptechnology.us" if is_production else "localhost",
     )
     return {"detail": "Successfully logged out and session context revoked."}
