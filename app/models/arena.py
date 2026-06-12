@@ -16,7 +16,7 @@ class Arena(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     arena_name: Mapped[str] = mapped_column(String(100), nullable=False) 
-    category: Mapped[str] = mapped_column(String(100), nullable=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=True)
     is_public: Mapped[bool] = mapped_column(default=False)
     creator_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     creator_organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), nullable=True)
