@@ -103,7 +103,9 @@ class ArenaResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     ai_tokens_used: int
-    questions: List[QuestionResponse]
+    total_players: int = 0
+    total_questions: int = 0
+    questions: Optional[List[QuestionResponse]] = None
 
     model_config = ConfigDict(from_attributes=True)
 

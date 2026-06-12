@@ -230,9 +230,28 @@ async def list_arenas(
         .limit(limit)
         .all()
     )
-    return arenas
+    
+    results = []
+    for a in arenas:
+        total_players = db.query(Player).filter(Player.arena_id == a.id).count()
+        total_questions = len(a.questions) if a.questions else 0
 
+        results.append({
+            "id": a.id,
+            "arena_name": a.arena_name,
+            "category": a.category,
+            "is_public": a.is_public,
+            "creator_id": a.creator_id,
+            "creator_organization_id": a.creator_organization_id,
+            "access_code": a.access_code,
+            "created_at": a.created_at,
+            "updated_at": a.updated_at,
+            "ai_tokens_used": a.ai_tokens_used,
+            "total_questions": total_questions,  # Count returned here
+            "total_players": total_players,
+        })
 
+    return results
 @router.get("/{arena_id}", response_model=ArenaDetailResponse)
 async def get_arena(
     arena_id: int,
@@ -1195,7 +1214,7 @@ def get_arena_scoreboard(
 async def lobby_websocket(websocket: WebSocket, access_code: str):
     """WebSocket endpoint for real-time lobby updates and shared countdown."""
     
-    # Accept the connection immediately
+    # Accept the connection 
     await websocket.accept()
     await ws_manager.connect(str(access_code), websocket)
 
