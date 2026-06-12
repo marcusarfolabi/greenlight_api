@@ -1023,7 +1023,7 @@ async def send_participants_message(
     for contact in contacts_list:
         target = contact.get("phone") or contact.get("email")
         recipient_name = contact.get("name") or "Participant"
-        payload_message = f"{message} Join here: https://greenlight-quiz.vercel.app/arena/{arena.id} with access code {arena.access_code}"
+        payload_message = f"{message} Join here: https://greenlight.webshoptechnology.us/arena/{arena.id} with access code {arena.access_code}"
 
         if channel == "sms":
             background_tasks.add_task(_bg_send_sms, target, recipient_name, payload_message, arena.id)
