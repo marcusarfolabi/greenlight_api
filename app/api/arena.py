@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Body, File, Form, UploadFile, BackgroundTasks, WebSocket, WebSocketDisconnect
 import asyncio
 from datetime import datetime
-from sqlalchemy import func
+from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import io
@@ -225,6 +225,7 @@ async def list_arenas(
     arenas = (
         db.query(Arena)
         .filter(Arena.creator_id == current_user.user_id)
+        .order_by(desc(Arena.updated_at))
         .offset(skip)
         .limit(limit)
         .all()
@@ -328,7 +329,7 @@ async def update_arena(
     if data.is_public is not None:
         arena.is_public = data.is_public
 
-    # Merge questions if provided (PATCH style: update existing, add new, delete only if no refs)
+  # Merge questions if provided (PUT style: Sync exactly what frontend sends)
     if getattr(data, "questions", None) is not None:
         # Resolve user/org for token accounting
         user = db.query(User).filter(User.id == current_user.user_id).first()
@@ -360,7 +361,6 @@ async def update_arena(
                     existing_q.point_value = q.point_value
                     existing_q.status = q.status or "ready"
                     existing_q.options_json = [{"text": opt_text} for opt_text in q.options]
-                    # Note: Don't modify ai_tokens_cost or is_ai_generated - preserve original values
                     logger.info(f"Updated existing question {q_id} in arena {arena_id}")
                     continue
             
@@ -394,14 +394,17 @@ async def update_arena(
 
         db.flush()
  
-        questions_to_consider_deleting = (
+        # --- THE FIX: ACTUALLY PURGE OMITTED QUESTIONS ---
+        # Find all questions in the DB for this arena that the Frontend left out
+        questions_to_delete = (
             db.query(Question)
             .filter(Question.arena_id == arena_id, ~Question.id.in_(incoming_question_ids))
             .all()
         )
         
-        for q_to_delete in questions_to_consider_deleting: 
-            logger.info(f"Question {q_to_delete.id} not in update request, keeping for data integrity")
+        for q_to_delete in questions_to_delete: 
+            logger.info(f"Removing question {q_to_delete.id} to match frontend state sync")
+            db.delete(q_to_delete) # <-- Hard delete from DB
 
         db.flush()
 
@@ -416,7 +419,6 @@ async def update_arena(
                 tokens_used=new_ai_tokens,
                 operation="arena_question_update",
             )
-
     db.commit()
     db.refresh(arena)
 
