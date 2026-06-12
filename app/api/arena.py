@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import io
 import csv
+from PyPDF2 import PdfReader
 
 from app.db.session import get_db
 from app.core.security import get_current_user
@@ -28,6 +29,7 @@ from app.models.user import User
 from app.schemas.user import AuthContext
 from app.services.token_service import TokenService
 from app.services.ai_question_service import AIQuestionGenerationService
+from app.services.upload_service import parse_questions_file
 from app.schemas.player import PlayerResponse, LobbyResponse, LobbyPlayer, PlayerScoreboardResponse
 from app.services.mail_service import MailService
 from app.services.twilio_service import TwilioService
@@ -36,6 +38,10 @@ from app.core.security import decode_token
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Upload limits
+MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_PDF_PAGES = 50
 
 
 async def _bg_send_sms(to: str, recipient_name: Optional[str], body: str, arena_id: int):
@@ -108,7 +114,11 @@ async def create_arena(
                 ai_tokens_cost=token_cost,
                 is_ai_generated=q.is_ai_generated,
                 options_json=[{"text": opt_text} for opt_text in q.options],
+                type=q.type,
+                correct_answers=q.correct_answers,
+                correct_answer_string=q.correct_answer_string,
             )
+            logger.debug(f"DEBUG SQLALCHEMY STAGED STRING: {question.correct_answer_string}")
             db.add(question)
 
         db.flush()  # Flush before logging to ensure arena has an ID
@@ -651,6 +661,255 @@ async def get_organization_players(
         )
 
     return result
+
+
+@router.post("/{arena_id}/questions/upload")
+async def upload_questions(
+    arena_id: int,
+    file: UploadFile | None = File(None),
+    preview: bool = Form(False),
+    use_ai: bool = Form(False),
+    current_user: AuthContext = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Upload questions for an arena (CSV or JSON). If `preview=true` returns parsed summary without saving."""
+    arena = db.query(Arena).filter(Arena.id == arena_id).first()
+    if not arena:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Arena not found")
+
+    # Only creator can upload questions
+    if arena.creator_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to upload questions for this arena")
+
+    if not file:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file provided")
+
+    try:
+        content = await file.read()
+        # Enforce file size limit
+        if len(content) > MAX_UPLOAD_SIZE_BYTES:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=f"File too large ({len(content)} bytes). Max allowed size is {MAX_UPLOAD_SIZE_BYTES} bytes")
+
+        # If PDF, check page count before heavy processing
+        if file.filename and file.filename.lower().endswith('.pdf'):
+            try:
+                reader = PdfReader(io.BytesIO(content))
+                num_pages = len(reader.pages)
+                if num_pages > MAX_PDF_PAGES:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"PDF has {num_pages} pages which exceeds the maximum allowed {MAX_PDF_PAGES} pages")
+            except HTTPException:
+                raise
+            except Exception:
+                # If PyPDF2 fails, continue and let parse_questions_file handle extraction/OCR
+                pass
+        parsed, errors = [], []
+
+        if use_ai:
+            # Extract or decode text for AI parsing
+            try:
+                # For docx/pdf we rely on upload_service extractors; otherwise decode bytes
+                text = None
+                if file.filename and file.filename.lower().endswith('.docx'):
+                    from app.services.upload_service import _extract_text_from_docx
+                    text = _extract_text_from_docx(content)
+                elif file.filename and file.filename.lower().endswith('.pdf'):
+                    # try selectable text first
+                    try:
+                        from app.services.upload_service import _extract_text_from_pdf
+                        text = _extract_text_from_pdf(content)
+                    except Exception:
+                        text = ""
+                    if not text or len(text.strip()) < 80:
+                        # try OCR via tesseract or google vision
+                        try:
+                            from app.services.upload_service import _ocr_pdf_with_tesseract
+                            text = _ocr_pdf_with_tesseract(content)
+                        except Exception:
+                            try:
+                                from app.services.upload_service import _ocr_with_google_vision
+                                text = _ocr_with_google_vision(content)
+                            except Exception:
+                                text = ""
+                else:
+                    try:
+                        text = content.decode('utf-8')
+                    except Exception:
+                        try:
+                            text = content.decode('latin-1')
+                        except Exception:
+                            text = ''
+
+                from app.core.config import settings
+                from app.services.upload_service import ai_parse_text_to_questions
+                parsed, errors = ai_parse_text_to_questions(text, settings.GEMINI_API_KEY)
+            except Exception as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"AI parse failed: {e}")
+        else:
+            parsed, errors = parse_questions_file(content, file.filename)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to parse file: {str(e)}")
+
+    if preview:
+        # return a small sample of parsed items for frontend preview
+        sample = []
+        for q in parsed[:10]:
+            try:
+                # pydantic model -> dict
+                sample.append(q.model_dump() if hasattr(q, 'model_dump') else dict(q))
+            except Exception:
+                sample.append({
+                    "prompt_text": getattr(q, 'prompt_text', ''),
+                    "options": getattr(q, 'options', []),
+                    "correct_option_index": getattr(q, 'correct_option_index', 0),
+                })
+        # Calculate AI token estimate for parsed items
+        total_ai_tokens = 0
+        try:
+            user = db.query(User).filter(User.id == current_user.user_id).first()
+            org = user.owned_organization if user else None
+            for q in parsed:
+                if getattr(q, 'is_ai_generated', False):
+                    total_ai_tokens += TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), use_ai_generation=True)
+
+            token_info = {
+                "token_estimate": total_ai_tokens,
+                "can_use": True,
+                "message": None,
+            }
+
+            if total_ai_tokens > 0:
+                if not org:
+                    token_info["can_use"] = False
+                    token_info["message"] = "Organization required for AI token billing"
+                elif not org.use_ai_for_arenas:
+                    token_info["can_use"] = False
+                    token_info["message"] = "AI parsing is not enabled for your organization"
+                else:
+                    can_use, msg = TokenService.can_use_tokens(db, org.id, total_ai_tokens)
+                    token_info["can_use"] = can_use
+                    token_info["message"] = msg
+        except Exception:
+            token_info = {"token_estimate": 0, "can_use": False, "message": "Failed to calculate token estimate"}
+
+        return {"parsed_count": len(parsed), "sample": sample, "errors": errors[:50], "token_info": token_info}
+
+
+@router.post("/questions/upload")
+async def upload_questions_preview(
+    file: UploadFile | None = File(None),
+    preview: bool = Form(True),
+    use_ai: bool = Form(False),
+    current_user: AuthContext = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Preview-only upload for creating questions before an arena exists."""
+    if not file:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file provided")
+
+    try:
+        contents = await file.read()
+        if len(contents) > MAX_UPLOAD_SIZE_BYTES:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File too large")
+
+        parsed, errors = parse_questions_file(contents, file.filename, use_ai=use_ai)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to parse uploaded file for preview: %s", e)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to parse file")
+
+    # Build sample
+    sample = []
+    for q in parsed[:10]:
+        try:
+            sample.append({
+                "prompt_text": q.prompt_text,
+                "options": q.options,
+                "correct_option_index": q.correct_option_index,
+            })
+        except Exception:
+            sample.append({
+                "prompt_text": getattr(q, 'prompt_text', ''),
+                "options": getattr(q, 'options', []),
+                "correct_option_index": getattr(q, 'correct_option_index', 0),
+            })
+
+    # Token estimate using current user's organization
+    total_ai_tokens = 0
+    try:
+        user = db.query(User).filter(User.id == current_user.user_id).first()
+        org = user.owned_organization if user else None
+        for q in parsed:
+            if getattr(q, 'is_ai_generated', False):
+                total_ai_tokens += TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), use_ai_generation=True)
+
+        token_info = {
+            "token_estimate": total_ai_tokens,
+            "can_use": True,
+            "message": None,
+        }
+
+        if total_ai_tokens > 0:
+            if not org:
+                token_info["can_use"] = False
+                token_info["message"] = "Organization required for AI token billing"
+            elif not org.use_ai_for_arenas:
+                token_info["can_use"] = False
+                token_info["message"] = "AI parsing is not enabled for your organization"
+            else:
+                can_use, msg = TokenService.can_use_tokens(db, org.id, total_ai_tokens)
+                token_info["can_use"] = can_use
+                token_info["message"] = msg
+    except Exception:
+        token_info = {"token_estimate": 0, "can_use": False, "message": "Failed to calculate token estimate"}
+
+    return {"parsed_count": len(parsed), "sample": sample, "errors": errors[:50], "token_info": token_info}
+
+    # Persist parsed questions (best-effort with transaction)
+    try:
+        # Determine org and token accounting
+        user = db.query(User).filter(User.id == current_user.user_id).first()
+        org = user.owned_organization if user else None
+
+        total_new_ai_tokens = 0
+        for q in parsed:
+            if org and org.use_ai_for_arenas and q.is_ai_generated:
+                total_new_ai_tokens += TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), use_ai_generation=True)
+
+        # If tokens needed, attempt deduction
+        if org and org.use_ai_for_arenas and total_new_ai_tokens > 0:
+            if not TokenService.deduct_tokens(db, org.id, total_new_ai_tokens):
+                raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient tokens to import AI-generated questions")
+
+        # Insert questions
+        for q in parsed:
+            token_cost = TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), use_ai_generation=True) if q.is_ai_generated and org and org.use_ai_for_arenas else 0
+            new_q = Question(
+                arena_id=arena.id,
+                prompt_text=q.prompt_text,
+                time_limit_seconds=q.time_limit_seconds,
+                correct_option_index=q.correct_option_index,
+                point_value=q.point_value,
+                status=q.status or "ready",
+                ai_tokens_cost=token_cost,
+                is_ai_generated=q.is_ai_generated,
+                options_json=[{"text": opt} for opt in q.options],
+            )
+            db.add(new_q)
+
+        if org and org.use_ai_for_arenas and total_new_ai_tokens > 0:
+            arena.ai_tokens_used = (arena.ai_tokens_used or 0) + total_new_ai_tokens
+            TokenService.log_token_usage(db=db, arena_id=arena.id, organization_id=org.id, tokens_used=total_new_ai_tokens, operation="upload_questions")
+
+        db.commit()
+        return {"imported": len(parsed), "failed": len(errors), "errors": errors[:50]}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.exception("Failed to import questions: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to import questions")
 
 @router.get("/{arena_id}/players", response_model=list[PlayerResponse])
 async def get_arena_players(

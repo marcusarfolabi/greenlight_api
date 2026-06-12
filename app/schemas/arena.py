@@ -7,9 +7,16 @@ class QuestionSchema(BaseModel):
     id: Optional[int] = None  # Make id optional for creation
     prompt_text: str
     time_limit_seconds: int = Field(ge=5, le=300)
-    options: List[str]  # List of option text strings
-    correct_option_index: int
     point_value: int
+    type: str = "multiple_choice"  # multiple_choice, multiple_select, true_false, numeric, short_answer
+    
+    options: List[str] = []
+    
+    correct_option_index: Optional[int] = None
+    
+    correct_answer_string: Optional[str] = None
+    
+    correct_answers: Optional[List[int]] = None  # For multiple_select, list of correct
     is_ai_generated: bool = False
     ai_tokens_cost: int = 0
     status: str = "ready"  # ready, draft, deleted
@@ -45,6 +52,8 @@ class QuestionResponse(QuestionSchema):
                 'is_ai_generated': data.is_ai_generated,
                 'ai_tokens_cost': data.ai_tokens_cost,
                 'status': data.status,
+                'type': data.type,
+                'correct_answers': data.correct_answers,
             }
         return data
 

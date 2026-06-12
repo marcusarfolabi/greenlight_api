@@ -45,32 +45,25 @@ class Question(Base):
     prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
     time_limit_seconds: Mapped[int] = mapped_column(default=10)
     point_value: Mapped[int] = mapped_column(default=10)
-    correct_option_index: Mapped[int] = mapped_column()
     status: Mapped[str] = mapped_column(String(10), default="ready")  # ready, draft, deleted
+    type: Mapped[str] = mapped_column(String(20), default="multiple_choice")  # multiple_choice, multiple_select, true_false, numeric, short_answer
+    
+    correct_option_index: Mapped[Optional[int]] = mapped_column(nullable=True)
+    
+    correct_answer_string: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    correct_answers: Mapped[Optional[List[int]]] = mapped_column(JSON, nullable=True)
     
     # AI token tracking
-    ai_tokens_cost: Mapped[int] = mapped_column(default=0)  # Tokens used to generate this question
+    ai_tokens_cost: Mapped[int] = mapped_column(default=0)
     is_ai_generated: Mapped[bool] = mapped_column(default=False)
     
-    # JSON-based options storage (compact, single row per question)
-    options_json: Mapped[list] = mapped_column(JSON, default=list)  # [{"text": "option1"}, {"text": "option2"}, ...]
+    # JSON-based options storage (empty list [] is safe for text-based questions)
+    options_json: Mapped[list] = mapped_column(JSON, default=list)  # [{"text": "option1"}, ...]
 
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
 
     arena: Mapped["Arena"] = relationship(back_populates="questions")
-    # options: Mapped[List["QuestionOption"]] = relationship(
-    #     back_populates="question", cascade="all, delete-orphan"
-    # )
-
-# class QuestionOption(Base):
-#     """Legacy table - kept for backward compatibility. Use options_json in Question model instead."""
-#     __tablename__ = "question_options"
-#     id: Mapped[int] = mapped_column(primary_key=True)
-#     question_id: Mapped[int] = mapped_column(ForeignKey("questions.id"))
-#     text: Mapped[str] = mapped_column(String(255))
-    
-#     question: Mapped["Question"] = relationship(back_populates="options")
-
 
 class ArenaTokenUsageLog(Base):
     """Detailed log of token usage per arena"""

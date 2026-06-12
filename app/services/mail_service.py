@@ -7,7 +7,7 @@ class MailService:
     @staticmethod
     async def send_welcome_email(email: str, name: str, org_name: str):
         message = MessageSchema(
-            subject="Welcome to FalconMail",
+            subject="Welcome to Green Light Quiz!",
             recipients=[email],
             template_body={"name": name, "org_name": org_name},
             subtype=MessageType.html
