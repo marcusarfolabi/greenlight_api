@@ -29,6 +29,10 @@ class UserService:
         return db.query(User).filter(User.email == email).first()
     
     @staticmethod
+    def get_user_by_google_id(db: Session, google_id: str) -> Optional[User]: 
+        return db.query(User).filter(User.google_id == google_id).first()
+    
+    @staticmethod
     def get_user_by_login(db: Session, login: str) -> Optional[User]:
         return (
             db.query(User)
@@ -37,21 +41,47 @@ class UserService:
         )
 
     @staticmethod
-    def create_user(db: Session, user_data: UserCreate) -> User:
+    def create_user(db: Session, user_data: UserCreate) -> User: 
+        google_id = getattr(user_data, "google_id", None)
+        linkedin_id = getattr(user_data, "linkedin_id", None)
+        apple_id = getattr(user_data, "apple_id", None)
+
         db_user = User(
             email=user_data.email,
             username=user_data.username,
             hashed_password=hash_password(user_data.password),
+            first_name=getattr(user_data, "first_name", None),
+            last_name=getattr(user_data, "last_name", None),
             role=user_data.role.value if isinstance(user_data.role, enum.Enum) else user_data.role,
-            is_active=user_data.is_active if getattr(user_data, "is_active", None) is not None else False
+            is_active=user_data.is_active if getattr(user_data, "is_active", None) is not None else False,
+            google_id=google_id,
+            linkedin_id=linkedin_id,
+            apple_id=apple_id
         )
         db.add(db_user)
         db.flush()
+ 
+        db.commit()
+        db.refresh(db_user)
+        return db_user
 
-        # Ensure each user has a dedicated wallet on signup.
-        # Only user_id is set here; organization wallets are created separately when orgs exist.
-        # user_wallet = Wallet(user_id=db_user.id, balance=0, currency="gbp")
-        # db.add(user_wallet)
+    @staticmethod
+    def update_user_social_id(db: Session, user_id: int, provider_field: str, provider_id: str) -> Optional[User]:
+        """
+        Dynamically links any OAuth unique provider ID to an existing account profile.
+        
+        :param provider_field: Must be "google_id", "linkedin_id", or "apple_id"
+        :param provider_id: The unique identifier string received from OAuth handshake payload
+        """
+        if provider_field not in ["google_id", "linkedin_id", "apple_id"]:
+            raise ValueError(f"Invalid social authentication provider field: {provider_field}")
+            
+        db_user = UserService.get_user(db, user_id)
+        if not db_user:
+            return None
+
+        setattr(db_user, provider_field, provider_id)
+        db.add(db_user)
         db.commit()
         db.refresh(db_user)
         return db_user

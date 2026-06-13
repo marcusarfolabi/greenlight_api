@@ -150,18 +150,29 @@ async def auth_google(
             google_requests.Request(), 
             settings.GOOGLE_CLIENT_ID
         )
-
-        email = id_info.get('email')
-        name = id_info.get('name', 'Google User')
         
-        if not email:
+        google_id = id_info.get('sub')
+        email = id_info.get('email')
+        first_name = id_info.get('given_name')
+        last_name = id_info.get('family_name')
+        
+        if not email or not google_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, 
-                detail="Google account missing email address."
+                detail="Google account missing identity parameters."
             )
 
+        # user = UserService.get_user_by_google_id(db, google_id)
+        
         user = UserService.get_user_by_email(db, email)
 
+        if not user:
+            user = UserService.get_user_by_email(db, email)
+            if user:
+                # Account Linking: Update their profile with the missing google_id string
+                user = UserService.update_user_social_id(db, user.id, "google_id", google_id)
+                logger.info(f"Linked existing account to Google ID for: {email}")
+                
         if not user:
             base_username = email.split('@')[0].replace('.', '_')
             username = base_username
@@ -174,11 +185,12 @@ async def auth_google(
             new_user_data = UserCreate(
                 email=email,
                 username=username,
-                first_name=name.split(' ')[0] if name else None,
-                last_name=name.split(' ', 1)[1] if name and ' ' in name else None,
+                first_name=first_name,
+                last_name=last_name,
                 password=secrets.token_urlsafe(16), 
                 role="user",
-                is_active=True
+                is_active=True,
+                google_id=google_id
             )
             
             user = UserService.create_user(db, new_user_data)
@@ -191,7 +203,7 @@ async def auth_google(
                 name=user_display_name,
                 org_name=""
             )
-        # ============ WORKSPACE & SUBSCRIPTION CHECKS ============
+
         hasOrg = UserService.user_has_org(db, user.id)
         org_id = UserService.get_user_org_id(db, user.id) if hasOrg else None
         

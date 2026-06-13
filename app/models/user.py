@@ -26,6 +26,10 @@ class User(Base):
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
     phone_number: Mapped[Optional[str]] = mapped_column(String(255))
     
+    google_id: Mapped[Optional[str]] = mapped_column(String(255))
+    linkedin_id: Mapped[Optional[str]] = mapped_column(String(255))
+    apple_id: Mapped[Optional[str]] = mapped_column(String(255)) 
+    
     role: Mapped[str] = mapped_column(String(50), default="user")    
     is_active: Mapped[bool] = mapped_column(default=False)
     email_verified_at: Mapped[datetime] = mapped_column(insert_default=func.now())
