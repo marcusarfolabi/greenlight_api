@@ -43,6 +43,7 @@ class UserService:
             username=user_data.username,
             hashed_password=hash_password(user_data.password),
             role=user_data.role.value if isinstance(user_data.role, enum.Enum) else user_data.role,
+            is_active=user_data.is_active if getattr(user_data, "is_active", None) is not None else False
         )
         db.add(db_user)
         db.flush()

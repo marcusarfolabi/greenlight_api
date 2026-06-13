@@ -43,7 +43,8 @@ class UserCreate(UserBase):
     role: str = "user" 
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    phone_number: Optional[str] = None # Added field
+    phone_number: Optional[str] = None  
+    is_active: Optional[bool] = False
 class UserOrgCreate(BaseModel):
     user: UserCreate
     organization: OrganizationCreate

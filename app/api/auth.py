@@ -139,8 +139,9 @@ from fastapi import Response # Ensure Response is injected
 
 @router.post("/google")
 async def auth_google(
-    response: Response, # Injected response object to bake cookies
+    response: Response, 
     payload: GoogleTokenPayload, 
+    background_tasks: BackgroundTasks,   
     db: Session = Depends(get_db)
 ):
     try:
@@ -176,12 +177,20 @@ async def auth_google(
                 first_name=name.split(' ')[0] if name else None,
                 last_name=name.split(' ', 1)[1] if name and ' ' in name else None,
                 password=secrets.token_urlsafe(16), 
-                role="user"
+                role="user",
+                is_active=True
             )
             
             user = UserService.create_user(db, new_user_data)
             logger.info(f"Successfully registered new user via Google: {email}")
 
+            user_display_name = new_user_data.first_name or user.username
+            background_tasks.add_task(
+                mail_service.send_welcome_email,
+                email=user.email,
+                name=user_display_name,
+                org_name=""
+            )
         # ============ WORKSPACE & SUBSCRIPTION CHECKS ============
         hasOrg = UserService.user_has_org(db, user.id)
         org_id = UserService.get_user_org_id(db, user.id) if hasOrg else None
@@ -214,7 +223,6 @@ async def auth_google(
             path="/"
         )
 
-        # ============ COMPLETE PAYLOAD RETURN ============
         response_data = {
             "access_token": access_token,
             "refresh_token": create_refresh_token({"sub": str(user.id)}),
