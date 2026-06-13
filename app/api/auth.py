@@ -9,10 +9,10 @@ from jose import jwt, JWTError
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
-from app.core.config import settings 
-from app.core.security import create_access_token, create_refresh_token, verify_password, hash_password
+from app.core.config import settings  
+from app.core.security import create_access_token, create_refresh_token, get_current_user, verify_password, hash_password
 from app.db.session import get_db
-from app.schemas.user import ForgotPasswordRequest, GoogleTokenPayload, ResendOTPRequest, ResetPasswordRequest, TokenRefreshRequest, UserCreate, UserResponse, VerifyOTPRequest
+from app.schemas.user import AuthContext, ForgotPasswordRequest, GoogleTokenPayload, ResendOTPRequest, ResetPasswordRequest, TokenRefreshRequest, UserCreate, UserResponse, VerifyOTPRequest
 from app.services.user_service import UserService           
 from app.services.mail_service import mail_service  
 from app.core.cache import otp_cache  
@@ -85,57 +85,58 @@ async def login(
     response.status_code = 200
     return response_data
 
-@router.post("/refresh")
-async def refresh_token(payload: TokenRefreshRequest, db: Session = Depends(get_db)):
-    """Exchange a valid, unexpired refresh token for a brand new access token."""
-    from app.services.user_service import UserService
-    try:
-        decoded_token = jwt.decode(
-            payload.refresh_token, 
-            settings.JWT_SECRET_KEY, 
-            algorithms=[settings.JWT_ALGORITHM]
-        ) 
-        if decoded_token.get("type") != "refresh":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, 
-                detail="Invalid token type context"
-            )
-            
-        user_id = decoded_token.get("sub")
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, 
-                detail="Missing subject token claim"
-            )
-            
-        user = UserService.get_user(db, user_id=int(user_id))
-        if not user or not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, 
-                detail="User account is deactivated or missing"
-            )
-            
-        # Re-mint access token using existing structural payload logic
-        new_access_token = create_access_token({
-            "sub": str(user.id),
-            "role": user.role,
-            "username": user.username,
-            "email": user.email,
-        })
-        
-        return {
-            "access_token": new_access_token,
-            "token_type": "bearer"
+@router.post("/refresh-token")
+async def refresh_user_token(
+    response: Response,
+    current_user: AuthContext = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    db_user = UserService.get_user(db, current_user.user_id)
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User account profile not found.")
+
+    hasOrg = UserService.user_has_org(db, db_user.id)
+    org_id = UserService.get_user_org_id(db, db_user.id) if hasOrg else None
+    
+    hasSub = False
+    if org_id is not None:
+        hasSub = UserService.user_has_subscription(db, org_id)
+
+    token_data = {
+        "sub": str(db_user.id),
+        "role": db_user.role,
+        "username": db_user.username,
+        "org_id": org_id,
+        "has_subscription": hasSub
+    }
+
+    access_token = create_access_token(token_data)
+    is_production = os.getenv("ENVIRONMENT") == "production"
+    
+    response.set_cookie(
+        key="auth_token",
+        value=access_token,
+        httponly=True,
+        secure=is_production,
+        samesite="lax",        
+        domain=".webshoptechnology.us" if is_production else "localhost",
+        max_age=21600,
+        path="/"
+    )
+
+    return {
+        "access_token": access_token,
+        "user": {
+            "id": db_user.id,
+            "username": db_user.username,
+            "email": db_user.email,  
+            "role": db_user.role,
+            "hasOrg": hasOrg,
+            "org_id": org_id,
+            "hasSub": hasSub
         }
-        
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail="Refresh token signature has expired or is invalid"
-        )
+    }
 
-
-from fastapi import Response # Ensure Response is injected
 
 @router.post("/google")
 async def auth_google(
@@ -162,14 +163,13 @@ async def auth_google(
                 detail="Google account missing identity parameters."
             )
 
-        # user = UserService.get_user_by_google_id(db, google_id)
+        user = UserService.get_user_by_google_id(db, google_id)
         
         user = UserService.get_user_by_email(db, email)
 
         if not user:
             user = UserService.get_user_by_email(db, email)
             if user:
-                # Account Linking: Update their profile with the missing google_id string
                 user = UserService.update_user_social_id(db, user.id, "google_id", google_id)
                 logger.info(f"Linked existing account to Google ID for: {email}")
                 

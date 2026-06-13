@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import io
 import csv
-from PyPDF2 import PdfReader
+from PyPDF2 import PdfReader # type: ignore
 
 from app.db.session import get_db
 from app.core.security import get_current_user
