@@ -64,7 +64,6 @@ def create_category(
 
 @router.get("", response_model=List[CategoryResponse])
 def list_categories(
-    org_id: int,
     db: Session = Depends(get_db),
     current_user: AuthContext = Depends(get_current_user)
 ):

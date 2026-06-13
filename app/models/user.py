@@ -24,6 +24,7 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255))
     first_name: Mapped[Optional[str]] = mapped_column(String(255))
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
+    phone_number: Mapped[Optional[str]] = mapped_column(String(255))
     
     role: Mapped[str] = mapped_column(String(50), default="user")    
     is_active: Mapped[bool] = mapped_column(default=False)

@@ -38,15 +38,23 @@ async def login(
 
     hasOrg = UserService.user_has_org(db, user.id)
     org_id = UserService.get_user_org_id(db, user.id) if hasOrg else None
+
+    # Explicitly check that org_id is not None before passing it
+    hasSub = False
+    if org_id is not None:
+        hasSub = UserService.user_has_subscription(db, org_id)
     
     token_data = {
         "sub": str(user.id),
         "role": user.role,
         "username": user.username,
-        "org_id": org_id if org_id else None
+        "org_id": org_id,
+        "has_subscription": hasSub  # Included in JWT payload if your frontend needs it from token decryption
     }
+    
     access_token = create_access_token(data=token_data)
     is_production = os.getenv("ENVIRONMENT") == "production"
+    
     response.set_cookie(
         key="auth_token",
         value=access_token,
@@ -57,6 +65,7 @@ async def login(
         max_age=21600,
         path="/"
     )
+    
     response_data = {
         "user": {
             "id": user.id,
@@ -64,7 +73,8 @@ async def login(
             "email": user.email,
             "role": user.role,
             "hasOrg": hasOrg,
-            "org_id": org_id
+            "org_id": org_id,
+            "hasSub": hasSub  # Included in the explicit JSON response payload
         }
     }
     
@@ -74,7 +84,6 @@ async def login(
     
     response.status_code = 200
     return response_data
-
 
 @router.post("/refresh")
 async def refresh_token(payload: TokenRefreshRequest, db: Session = Depends(get_db)):
@@ -126,8 +135,14 @@ async def refresh_token(payload: TokenRefreshRequest, db: Session = Depends(get_
         )
 
 
+from fastapi import Response # Ensure Response is injected
+
 @router.post("/google")
-async def auth_google(payload: GoogleTokenPayload, db: Session = Depends(get_db)):
+async def auth_google(
+    response: Response, # Injected response object to bake cookies
+    payload: GoogleTokenPayload, 
+    db: Session = Depends(get_db)
+):
     try:
         id_info = id_token.verify_oauth2_token(
             payload.token, 
@@ -162,37 +177,74 @@ async def auth_google(payload: GoogleTokenPayload, db: Session = Depends(get_db)
                 last_name=name.split(' ', 1)[1] if name and ' ' in name else None,
                 password=secrets.token_urlsafe(16), 
                 role="user"
-                
             )
             
             user = UserService.create_user(db, new_user_data)
             logger.info(f"Successfully registered new user via Google: {email}")
 
+        # ============ WORKSPACE & SUBSCRIPTION CHECKS ============
+        hasOrg = UserService.user_has_org(db, user.id)
+        org_id = UserService.get_user_org_id(db, user.id) if hasOrg else None
+        
+        # Guard against passing None to subscription check
+        hasSub = False
+        if org_id is not None:
+            hasSub = UserService.user_has_subscription(db, org_id)
+    
         token_data = {
             "sub": str(user.id),
             "role": user.role,
             "username": user.username,
-            "email": user.email,
+            "org_id": org_id,
+            "has_subscription": hasSub
         }
 
-        return {
-            "access_token": create_access_token(token_data),
+        # ============ BAKE COOKIES (MATCHES LOGIN ROUTE) ============
+        access_token = create_access_token(token_data)
+        is_production = os.getenv("ENVIRONMENT") == "production"
+        
+        response.set_cookie(
+            key="auth_token",
+            value=access_token,
+            httponly=True,
+            secure=is_production,
+            samesite="lax",        
+            domain=".webshoptechnology.us" if is_production else "localhost",
+            max_age=21600,
+            path="/"
+        )
+
+        # ============ COMPLETE PAYLOAD RETURN ============
+        response_data = {
+            "access_token": access_token,
             "refresh_token": create_refresh_token({"sub": str(user.id)}),
             "token_type": "bearer",
-            "role": user.role,
-            "username": user.username,
-            "email": user.email,
-            "id": user.id,
-            "is_active": user.is_active,
-            "created_at": user.created_at,
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "role": user.role,
+                "is_active": user.is_active,
+                "created_at": user.created_at.isoformat() if hasattr(user.created_at, "isoformat") else user.created_at,
+                "hasOrg": hasOrg,
+                "org_id": org_id,
+                "hasSub": hasSub
+            }
         }
+
+        # Include subdomain if workspace is configured
+        if hasOrg:
+            response_data["user"]["subdomain"] = UserService.user_sub_domain(db, user.id)
+
+        response.status_code = 200
+        return response_data
 
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, 
             detail="Invalid Google OAuth token signature or token expired"
         )
-
+        
 @router.post("/register", response_model=UserResponse)
 async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     if UserService.get_user_by_email(db, user_data.email):
@@ -213,23 +265,23 @@ async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db:
     org_name = ""  
 
     # 3. Schedule welcome communication
-    background_tasks.add_task(
-        mail_service.send_welcome_email,
-        email=new_user.email,
-        name=user_display_name,
-        org_name=org_name
-    )
+    # background_tasks.add_task(
+    #     mail_service.send_welcome_email,
+    #     email=new_user.email,
+    #     name=user_display_name,
+    #     org_name=org_name
+    # )
     
     otp_code = f"{secrets.randbelow(9000) + 1000}"
     expire = datetime.utcnow() + timedelta(minutes=15)
         
     otp_cache.set_otp(email=new_user.email, otp=otp_code, expires_at=expire)
-    background_tasks.add_task(
-        mail_service.send_email_confirmation,
-        email=new_user.email,
-        name=user_display_name,
-        otp=otp_code
-    )
+    # background_tasks.add_task(
+    #     mail_service.send_email_confirmation,
+    #     email=new_user.email,
+    #     name=user_display_name,
+    #     otp=otp_code
+    # )
     
     return new_user
 

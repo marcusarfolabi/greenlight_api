@@ -11,6 +11,8 @@ from app.models.user import User
 from app.models.wallet import Wallet
 from app.schemas.user import UserCreate, UserUpdate
 from app.core.config import settings
+from app.models.subscription import Subscription
+
 class UserService:
     """Service layer for user operations."""
 
@@ -77,6 +79,14 @@ class UserService:
         db.delete(db_user)
         db.commit()
         return db_user
+    
+    @staticmethod
+    def user_has_subscription(db: Session, org_id: int) -> bool:
+        existing = db.query(Subscription).filter(
+            Subscription.organization_id == org_id,
+            Subscription.status == "active"
+        ).first() 
+        return existing is not None
     
     @staticmethod
     def user_has_org(db: Session, user_id: int) -> bool:

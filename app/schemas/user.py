@@ -43,6 +43,7 @@ class UserCreate(UserBase):
     role: str = "user" 
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    phone_number: Optional[str] = None # Added field
 class UserOrgCreate(BaseModel):
     user: UserCreate
     organization: OrganizationCreate
@@ -59,6 +60,7 @@ class UserUpdate(BaseModel):
     username: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    phone_number: Optional[str] = None # Added field
     email: Optional[EmailStr] = None
     is_active: Optional[bool] = None
 
@@ -73,6 +75,7 @@ class UserResponse(UserBase):
     owned_organization: Optional[OrganizationResponse] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    phone_number: Optional[str] = None # Added field
     username: str
     email: EmailStr
 

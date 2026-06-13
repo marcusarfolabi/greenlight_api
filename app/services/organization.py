@@ -49,6 +49,9 @@ class OrganizationService:
                 name=org_data.name,
                 subdomain=org_data.subdomain,
                 industry=org_data.industry,
+                city=org_data.city,
+                state=org_data.state,
+                country=org_data.country,
                 owner_id=user_id,
             )
 
@@ -56,8 +59,14 @@ class OrganizationService:
             db.flush()
 
             db.add(Wallet(organization_id=db_org.id, user_id=user_id, balance=0, currency="gbp"))
+            
             user.organization_id = db_org.id
+            user.first_name = org_data.first_name
+            user.last_name = org_data.last_name
+            user.phone_number = org_data.phone_number
+            
             db.commit()
+            
             db.refresh(db_org)
             db.refresh(user)
 

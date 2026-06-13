@@ -1,9 +1,10 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+import os
+from fastapi import APIRouter, Depends, HTTPException, status, Response 
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.core.security import get_current_user  
+from app.core.security import create_access_token, get_current_user  
 
 from app.schemas.organization import (
     OrganizationCreate, OrganizationResponse, 
@@ -22,9 +23,11 @@ from app.schemas.user import AuthContext
 router = APIRouter()
 logger = logging.getLogger(__name__) 
 
+
 @router.post("", response_model=OrganizationResponse)
 async def setup_user_organization(
     org_data: OrganizationCreate, 
+    response: Response, 
     db: Session = Depends(get_db), 
     auth: AuthContext = Depends(get_current_user)
 ):
@@ -33,10 +36,9 @@ async def setup_user_organization(
     user = UserService.get_user(db, user_id=user_id)
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User account not found."
+            status_code=status.HTTP_404_NOT_FOUND, detail="User account not found."
         )
-    # print it role
+
     if auth.role != UserRole.HOST.value:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -50,9 +52,31 @@ async def setup_user_organization(
         )
 
     new_org = OrganizationService.create_organization_for_user(
-        db=db, 
-        user_id=auth.user_id, 
-        org_data=org_data
+        db=db, user_id=auth.user_id, org_data=org_data
+    )
+    
+    hasSub = UserService.user_has_subscription(db, new_org.id)
+    
+    token_data = {
+        "sub": str(user.id),
+        "role": user.role,
+        "username": user.username,
+        "org_id": new_org.id,
+        "has_subscription": hasSub
+    }
+    
+    access_token = create_access_token(data=token_data)
+    is_production = os.getenv("ENVIRONMENT") == "production"
+    
+    response.set_cookie(
+        key="auth_token",
+        value=access_token,
+        httponly=True,
+        secure=is_production,
+        samesite="lax",        
+        domain=".webshoptechnology.us" if is_production else "localhost",
+        max_age=21600,
+        path="/"
     )
     
     return new_org

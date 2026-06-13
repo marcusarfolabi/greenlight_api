@@ -9,10 +9,16 @@ class OrganizationBase(BaseModel):
     industry: str 
     capped_tokens: Optional[int] = None
     stripe_connect_id: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
 
 
 class OrganizationCreate(OrganizationBase):
     owner_id: Optional[int] = None
+    first_name: str
+    last_name: str
+    phone_number: str
 
 
 class OrganizationUpdate(BaseModel):
@@ -21,6 +27,9 @@ class OrganizationUpdate(BaseModel):
     industry: Optional[str] = None
     is_verified: Optional[bool] = None
     stripe_connect_id: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
 
 
 class OrganizationResponse(OrganizationBase):
