@@ -252,6 +252,7 @@ async def list_arenas(
         })
 
     return results
+
 @router.get("/{arena_id}", response_model=ArenaDetailResponse)
 async def get_arena(
     arena_id: int,

@@ -64,6 +64,7 @@ class OrganizationService:
             user.first_name = org_data.first_name
             user.last_name = org_data.last_name
             user.phone_number = org_data.phone_number
+            user.role = org_data.role
             
             db.commit()
             

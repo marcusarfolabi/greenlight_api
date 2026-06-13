@@ -39,11 +39,11 @@ async def setup_user_organization(
             status_code=status.HTTP_404_NOT_FOUND, detail="User account not found."
         )
 
-    if auth.role != UserRole.HOST.value:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only accounts configured with a HOST role can construct workspace domains."
-        )
+    # if auth.role != UserRole.HOST.value:
+    #     raise HTTPException(
+    #         status_code=status.HTTP_403_FORBIDDEN,
+    #         detail="Only accounts configured with a HOST role can construct workspace domains."
+    #     )
 
     if OrganizationService.get_by_subdomain(db, org_data.subdomain):
         raise HTTPException(
