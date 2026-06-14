@@ -43,9 +43,10 @@ app = FastAPI(
 async def startup_event():
     logger.info("Initializing database and running seeders...")
     try:
+        Base.metadata.drop_all(bind=engine) #temporary testing
         Base.metadata.create_all(bind=engine)
-        # seed_superadmin()
-        # seed_subscription_plans()
+        seed_superadmin()
+        seed_subscription_plans()
         # logger.info("Database initialization and seeding complete.")
     except OperationalError as e:
         logger.error(
