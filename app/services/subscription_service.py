@@ -41,7 +41,6 @@ class SubscriptionService:
         Returns:
             The created Subscription object
         """
-        # Get the plan to retrieve ai_tokens
         plan = db.query(SubscriptionPlan).filter(
             SubscriptionPlan.id == plan_id
         ).first()
@@ -57,7 +56,6 @@ class SubscriptionService:
         if not organization:
             raise ValueError(f"Organization {organization_id} not found")
         
-        # Set default period dates if not provided
         if period_start is None:
             period_start = datetime.utcnow()
         if period_end is None:
@@ -66,7 +64,6 @@ class SubscriptionService:
             else:
                 period_end = period_start + timedelta(days=30)
         
-        # Cancel any existing active subscriptions
         existing = db.query(Subscription).filter(
             Subscription.organization_id == organization_id,
             Subscription.status == "active"
@@ -77,8 +74,8 @@ class SubscriptionService:
             existing.canceled_at = period_start
             logger.info(f"Canceled existing subscription {existing.id} for org {organization_id}")
         
-        # Allocate AI tokens from the plan to the organization (add to existing)
         organization.capped_tokens = (organization.capped_tokens or 0) + plan.ai_tokens
+        organization.is_verified = True
         logger.info(f"Added {plan.ai_tokens} tokens to organization {organization_id} (total: {organization.capped_tokens})")
         
         # Create the new subscription
