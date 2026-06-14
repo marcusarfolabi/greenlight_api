@@ -383,7 +383,6 @@ async def update_arena(
                     existing_q.status = q.status or "ready"
                     existing_q.options_json = [{"text": opt_text} for opt_text in q.options]
                     
-                    # ✅ FIX 1: Map the missing conditional answer types on update!
                     existing_q.type = getattr(q, "type", "multiple_choice")
                     existing_q.correct_option_index = q.correct_option_index
                     existing_q.correct_answer_string = getattr(q, "correct_answer_string", None)
@@ -402,7 +401,6 @@ async def update_arena(
                 )
                 new_ai_tokens += token_cost
 
-            # ✅ FIX 2: Map the missing fields inside the creation model constructor!
             new_q = Question(
                 arena_id=arena.id,
                 prompt_text=q.prompt_text,
@@ -418,7 +416,28 @@ async def update_arena(
                 correct_answers=getattr(q, "correct_answers", []),
             )
             db.add(new_q)
+            db.flush()  # <-- Force SQLAlchemy to generate a real database ID for this new question!
+            incoming_question_ids.add(new_q.id)  # <-- Add the fresh ID to the safe list so it won't be deleted!
 
+        # Deduct tokens only for NEW AI-generated questions
+        if org.use_ai_for_arenas and new_ai_tokens > 0:
+            if not TokenService.deduct_tokens(db, org.id, new_ai_tokens):
+                raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient tokens")
+
+        # --- FIX 3: SAFE PURGE OMITTED QUESTIONS WITH BOUNDS ---
+        # Now incoming_question_ids contains both updated AND newly created IDs
+        delete_query = db.query(Question).filter(Question.arena_id == arena_id)
+        if incoming_question_ids:
+            delete_query = delete_query.filter(~Question.id.in_(incoming_question_ids))
+            
+        questions_to_delete = delete_query.all()
+        
+        for q_to_delete in questions_to_delete: 
+            logger.info(f"Removing question {q_to_delete.id} to match frontend state sync")
+            db.delete(q_to_delete)
+
+        db.flush()
+        
         # Deduct tokens only for NEW AI-generated questions
         if org.use_ai_for_arenas and new_ai_tokens > 0:
             if not TokenService.deduct_tokens(db, org.id, new_ai_tokens):
