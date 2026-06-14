@@ -1,14 +1,16 @@
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 from pydantic import BaseModel
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 import stripe  # type: ignore
 
 from app.db.session import get_db
 from app.core.config import settings
+from app.core.security import create_access_token, get_current_user
 from app.models.subscription import SubscriptionPlan, Subscription
 from app.models.organization import Organization
 from app.schemas.subscription import (
@@ -18,15 +20,65 @@ from app.schemas.subscription import (
     SubscriptionResponse,
     SubscriptionCreate,
 )
-from app.core.security import get_current_user
 from app.schemas.user import AuthContext
 from app.services.subscription_service import SubscriptionService
+from app.services.user_service import UserService
 
 
 router = APIRouter()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def set_auth_cookie(response: Response, db: Session, user_id: int) -> dict:
+    user = UserService.get_user(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User account not found",
+        )
+
+    has_org = UserService.user_has_org(db, user.id)
+    org_id = UserService.get_user_org_id(db, user.id) if has_org else None
+    has_sub = UserService.user_has_subscription(db, org_id) if org_id is not None else False
+
+    token_data = {
+        "sub": str(user.id),
+        "role": user.role,
+        "username": user.username,
+        "org_id": org_id,
+        "has_subscription": has_sub,
+    }
+
+    access_token = create_access_token(data=token_data)
+    is_production = os.getenv("ENVIRONMENT") == "production"
+
+    response.set_cookie(
+        key="auth_token",
+        value=access_token,
+        httponly=True,
+        secure=is_production,
+        samesite="lax",
+        domain=".webshoptechnology.us" if is_production else "localhost",
+        max_age=21600,
+        path="/",
+    )
+
+    user_data = {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "role": user.role,
+        "hasOrg": has_org,
+        "org_id": org_id,
+        "hasSub": has_sub,
+    }
+
+    if has_org:
+        user_data["subdomain"] = UserService.user_sub_domain(db, user.id)
+
+    return {"access_token": access_token, "user": user_data}
 
 
 @router.get("/plans", response_model=list[SubscriptionPlanResponse])
@@ -79,6 +131,7 @@ async def get_organization_subscription(
 async def create_subscription(
     subscription_data: SubscriptionCreate,
     background_tasks: BackgroundTasks,
+    response: Response,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(get_current_user)
 ):
@@ -101,8 +154,7 @@ async def create_subscription(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Subscription plan not found"
         )
-    
-    # Create subscription using service (handles token allocation)
+     
     subscription = SubscriptionService.create_subscription(
         db=db,
         organization_id=auth.org_id,
@@ -111,6 +163,8 @@ async def create_subscription(
         stripe_customer_id=subscription_data.stripe_customer_id,
         background_tasks=background_tasks,
     )
+
+    set_auth_cookie(response, db, auth.user_id)
     
     return subscription
 
@@ -218,6 +272,7 @@ async def create_payment_intent(
 async def confirm_payment(
     request: ConfirmPaymentRequest,
     background_tasks: BackgroundTasks,
+    response: Response,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(get_current_user)
 ):
@@ -273,13 +328,16 @@ async def confirm_payment(
             stripe_customer_id=stripe_customer_id,
             background_tasks=background_tasks,
         )
+
+        auth_payload = set_auth_cookie(response, db, auth.user_id)
         
         logger.info(f"Subscription created for org {auth.org_id} on plan {request.plan_id}")
         
         return {
             "success": True,
             "message": "Subscription activated successfully",
-            "subscription_id": subscription.id
+            "subscription_id": subscription.id,
+            "user": auth_payload["user"],
         }
     
     except HTTPException:
