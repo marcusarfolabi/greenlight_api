@@ -512,6 +512,7 @@ async def get_token_usage_logs(
         db.query(ArenaTokenUsageLog)
         .filter(ArenaTokenUsageLog.organization_id == user.owned_organization.id)
         .order_by(ArenaTokenUsageLog.created_at.desc())
+        .limit(10)
         .all()
     )
 
@@ -524,7 +525,12 @@ async def validate_access_code(
     db: Session = Depends(get_db),
 ) -> dict:
     """Validate arena access code for lobby entry"""
-    arena = db.query(Arena).filter(Arena.access_code == access_code).first()
+    try:
+        access_code_int = int(access_code)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid access code format")
+
+    arena = db.query(Arena).filter(Arena.access_code == access_code_int).first()
 
     if not arena:
         raise HTTPException(
@@ -534,12 +540,6 @@ async def validate_access_code(
     # validate nickname
     if not player_nickname or not player_nickname.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="player_nickname is required")
-
-    # coerce access code to int for storage
-    try:
-        access_code_int = int(access_code)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid access code format")
 
     # determine organization id from arena
     org_id = getattr(arena, "creator_organization_id", None) or getattr(arena, "organization_id", None)
@@ -1060,7 +1060,14 @@ async def get_lobby_info(
     db: Session = Depends(get_db),
 ) -> LobbyResponse:
     """Get lobby info for a given access code"""
-    arena = db.query(Arena).filter(Arena.access_code == access_code).first()
+    try:
+        access_code_int = int(access_code)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid access code"
+        )
+
+    arena = db.query(Arena).filter(Arena.access_code == access_code_int).first()
 
     if not arena:
         raise HTTPException(
@@ -1135,16 +1142,28 @@ async def start_arena_countdown(
     async def _countdown_broadcast(ac: str, remaining: int):
         await ws_manager.broadcast(ac, {"type": "countdown", "payload": {"countdown": remaining}})
 
-    # Start the countdown (this will broadcast countdown messages and game_start when done)
-    ws_manager.start_countdown(access_code, countdown_seconds, _countdown_broadcast)
+    active_connections = ws_manager.connection_count(access_code)
 
-    logger.info(f"Countdown started for arena {arena_id} by user {current_user.user_id} with {countdown_seconds} seconds")
+    # Start the countdown (this will broadcast countdown messages and game_start when done)
+    started = ws_manager.start_countdown(access_code, countdown_seconds, _countdown_broadcast)
+
+    logger.info(
+        "Countdown request for arena %s by user %s with %s seconds access_code=%s active_connections=%s started=%s",
+        arena_id,
+        current_user.user_id,
+        countdown_seconds,
+        access_code,
+        active_connections,
+        started,
+    )
 
     return {
-        "message": "Countdown started",
+        "message": "Countdown started" if started else "Countdown already running",
         "arena_id": arena_id,
         "access_code": access_code,
         "countdown_seconds": countdown_seconds,
+        "active_connections": active_connections,
+        "started": started,
     }
 
 
@@ -1228,7 +1247,13 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
         db = next(db_gen)
         
         try:
-            arena = db.query(Arena).filter(Arena.access_code == access_code).first()
+            try:
+                access_code_int = int(access_code)
+            except (TypeError, ValueError):
+                await websocket.close(code=1008)
+                return
+
+            arena = db.query(Arena).filter(Arena.access_code == access_code_int).first()
             if not arena:
                 await websocket.close(code=1008)
                 return
