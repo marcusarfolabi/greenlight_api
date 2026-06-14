@@ -44,18 +44,19 @@ async def startup_event():
     logger.info("Initializing database and running seeders...")
     try:
         # 🚨 FORCE WIPE: Disable constraint checks, drop everything, re-enable checks
-        with engine.connect() as connection:
-            # Turn off foreign key checking
-            connection.execute(text("SET session_replication_role = 'replica';"))
+        with engine.begin() as connection:
+            # Grab all table names registered in your SQLAlchemy Base models
+            table_names = ", ".join([f'"{table.name}"' for table in Base.metadata.sorted_tables])
             
-            # Now SQLAlchemy can drop everything without throwing CircularDependencyError
-            Base.metadata.drop_all(bind=engine)
-            
-            # Turn foreign key checking back on
-            connection.execute(text("SET session_replication_role = 'origin';"))
-            connection.commit()
+            if table_names:
+                logger.info(f"Force dropping tables: {table_names}")
+                # CASCADE forces Postgres to drop tables regardless of circular foreign keys
+                connection.execute(text(f"DROP TABLE IF EXISTS {table_names} CASCADE;"))
+                logger.info("Database cleanly wiped via raw CASCADE.")
+            else:
+                logger.info("No tables discovered to drop.")
 
-        # Recreate tables cleanly
+        # Recreate tables cleanly from scratch
         Base.metadata.create_all(bind=engine)
         seed_superadmin()
         seed_subscription_plans()
