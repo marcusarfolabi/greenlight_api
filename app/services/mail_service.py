@@ -37,6 +37,7 @@ class MailService:
         fm = FastMail(mail_conf)
         await fm.send_message(message, template_name="email_confirmation.html")
     
+    
     @staticmethod
     async def send_email_arena_access_code(email: str, name: str, subject: str, body: str, arena_details: dict, org_name: Optional[str] = None):
         message = MessageSchema(
@@ -53,5 +54,20 @@ class MailService:
         )
         fm = FastMail(mail_conf)
         await fm.send_message(message, template_name="arena_access_code.html")
+
+    @staticmethod
+    async def send_subscription_message(email: str, name: str, org_name: str, plan_details: dict):
+        message = MessageSchema(
+            subject=f"Your {plan_details.get('plan_name')} subscription is active",
+            recipients=[email],
+            template_body={
+                "name": name,
+                "org_name": org_name,
+                **plan_details,
+            },
+            subtype=MessageType.html,
+        )
+        fm = FastMail(mail_conf)
+        await fm.send_message(message, template_name="subscription_message.html")
 
 mail_service = MailService()

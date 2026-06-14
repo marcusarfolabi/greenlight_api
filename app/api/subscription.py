@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from pydantic import BaseModel
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import stripe  # type: ignore
 
@@ -78,6 +78,7 @@ async def get_organization_subscription(
 @router.post("", response_model=SubscriptionResponse)
 async def create_subscription(
     subscription_data: SubscriptionCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(get_current_user)
 ):
@@ -108,6 +109,7 @@ async def create_subscription(
         plan_id=subscription_data.plan_id,
         stripe_subscription_id=subscription_data.stripe_subscription_id,
         stripe_customer_id=subscription_data.stripe_customer_id,
+        background_tasks=background_tasks,
     )
     
     return subscription
@@ -215,6 +217,7 @@ async def create_payment_intent(
 @router.post("/confirm-payment")
 async def confirm_payment(
     request: ConfirmPaymentRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(get_current_user)
 ):
@@ -268,6 +271,7 @@ async def confirm_payment(
             plan_id=request.plan_id,
             stripe_subscription_id=payment_intent.id,
             stripe_customer_id=stripe_customer_id,
+            background_tasks=background_tasks,
         )
         
         logger.info(f"Subscription created for org {auth.org_id} on plan {request.plan_id}")

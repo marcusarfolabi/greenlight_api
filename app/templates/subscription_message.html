@@ -1,0 +1,200 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        font-family:
+          "Instrument Sans",
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+        background-color: #ffffff;
+        color: #171717;
+        margin: 0;
+        padding: 40px 20px;
+      }
+
+      .container {
+        max-width: 540px;
+        margin: 0 auto;
+        border: 1px solid #eaeaea;
+        border-radius: 8px;
+        padding: 32px;
+      }
+
+      .logo-img {
+        display: block;
+        width: 160px;
+        height: auto;
+        margin: 0 auto 28px;
+      }
+
+      .title {
+        color: #000000;
+        font-size: 24px;
+        font-weight: 700;
+        line-height: 1.25;
+        margin: 0 0 14px;
+      }
+
+      .text {
+        color: #555555;
+        font-size: 14px;
+        line-height: 1.6;
+        margin: 0 0 20px;
+      }
+
+      .summary {
+        background-color: #f9fafb;
+        border: 1px solid #eeeeee;
+        border-radius: 8px;
+        margin: 24px 0;
+        padding: 18px;
+      }
+
+      .summary-title {
+        color: #000000;
+        font-size: 16px;
+        font-weight: 700;
+        margin: 0 0 10px;
+      }
+
+      .row {
+        border-top: 1px solid #eeeeee;
+        padding: 10px 0;
+      }
+
+      .row:first-of-type {
+        border-top: 0;
+      }
+
+      .label {
+        color: #777777;
+        display: block;
+        font-size: 12px;
+        margin-bottom: 3px;
+      }
+
+      .value {
+        color: #111111;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .feature-list {
+        margin: 18px 0 24px;
+        padding-left: 18px;
+      }
+
+      .feature-list li {
+        color: #444444;
+        font-size: 14px;
+        line-height: 1.6;
+        margin-bottom: 8px;
+      }
+
+      .footer {
+        border-top: 1px solid #eaeaea;
+        color: #999999;
+        font-size: 12px;
+        margin-top: 30px;
+        padding-top: 18px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <img
+        src="https://greenlight.webshoptechnology.us/og-image.jpg"
+        alt="GreenLight Logo"
+        class="logo-img"
+      />
+
+      <h1 class="title">{{ plan_name }} is active for {{ org_name }}</h1>
+
+      <p class="text">
+        Hi {{ name }}, your GreenLight subscription is ready. Here is what your
+        workspace can use on this plan.
+      </p>
+
+      <div class="summary">
+        <p class="summary-title">{{ plan_name }}</p>
+
+        {% if plan_description %}
+          <p class="text">{{ plan_description }}</p>
+        {% endif %}
+
+        <div class="row">
+          <span class="label">Billing</span>
+          <span class="value">{{ currency }} {{ plan_price }} / {{ interval }}</span>
+        </div>
+
+        <div class="row">
+          <span class="label">AI question generation</span>
+          <span class="value">{{ ai_tokens }} tokens included</span>
+        </div>
+
+        <div class="row">
+          <span class="label">Players</span>
+          <span class="value">
+            {% if max_players is not none %}Up to {{ max_players }} players{% else %}Unlimited players{% endif %}
+          </span>
+        </div>
+
+        <div class="row">
+          <span class="label">Arenas</span>
+          <span class="value">
+            {% if max_arenas is not none %}Up to {{ max_arenas }} arenas{% else %}Unlimited arenas{% endif %}
+          </span>
+        </div>
+
+        <div class="row">
+          <span class="label">Custom themes</span>
+          <span class="value">
+            {% if max_custom_themes is not none %}Up to {{ max_custom_themes }} themes{% else %}Unlimited themes{% endif %}
+          </span>
+        </div>
+
+        {% if period_end %}
+          <div class="row">
+            <span class="label">Current period ends</span>
+            <span class="value">{{ period_end }}</span>
+          </div>
+        {% endif %}
+      </div>
+
+      <p class="text">Features enabled on this plan:</p>
+
+      <ul class="feature-list">
+        <li>Live arenas with real-time scoring and leaderboards.</li>
+        <li>AI-assisted question generation using your included token capacity.</li>
+        {% if analytics %}<li>Analytics for tracking arena and player performance.</li>{% endif %}
+        {% if api_access %}<li>API access for deeper integrations.</li>{% endif %}
+        {% if white_label %}<li>White-label options for branded experiences.</li>{% endif %}
+        {% if priority_support %}<li>Priority support from the GreenLight team.</li>{% endif %}
+      </ul>
+
+      <p class="text">
+        You can manage billing, wallet activity, arena capacity, and workspace
+        settings from your dashboard.
+      </p>
+
+      <p class="text">
+        Thanks,<br />
+        <strong>The GreenLight Sales Team</strong>
+      </p>
+
+      <div class="footer">&copy; 2026 GreenLight. Built for live competition.</div>
+    </div>
+  </body>
+</html>

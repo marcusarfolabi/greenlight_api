@@ -1,10 +1,13 @@
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
+from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.models.subscription import Subscription, SubscriptionPlan
 from app.models.organization import Organization
+from app.models.wallet import Transaction, TransactionType, Wallet
+from app.services.mail_service import mail_service
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,7 @@ class SubscriptionService:
         stripe_customer_id: Optional[str] = None,
         period_start: Optional[datetime] = None,
         period_end: Optional[datetime] = None,
+        background_tasks: Optional[BackgroundTasks] = None,
     ) -> Subscription:
         """
         Create a subscription for an organization and allocate AI tokens.
@@ -88,9 +92,61 @@ class SubscriptionService:
             current_period_end=period_end,
         )
         
+        wallet = db.query(Wallet).filter(
+            Wallet.organization_id == organization_id
+        ).first()
+
+        if not wallet:
+            wallet = Wallet(
+                organization_id=organization_id,
+                user_id=None,
+                balance=0,
+                pending_balance=0,
+                currency=plan.currency,
+            )
+            db.add(wallet)
+            db.flush()
+
+        transaction = Transaction(
+            wallet_id=wallet.id,
+            amount=-int(plan.price * 100),
+            type=TransactionType.SUBSCRIPTION,
+            stripe_reference=stripe_subscription_id,
+            status="completed",
+            description=f"{plan.name} subscription",
+        )
+
         db.add(subscription)
+        db.add(transaction)
         db.commit()
         db.refresh(subscription)
+
+        if background_tasks:
+            owner = organization.owner
+            if owner and owner.email:
+                owner_name = owner.first_name or owner.username or "there"
+                background_tasks.add_task(
+                    mail_service.send_subscription_message,
+                    email=owner.email,
+                    name=owner_name,
+                    org_name=organization.name,
+                    plan_details={
+                        "plan_name": plan.name,
+                        "plan_description": plan.description,
+                        "plan_price": f"{plan.price:.2f}",
+                        "currency": plan.currency.upper(),
+                        "interval": plan.interval,
+                        "ai_tokens": plan.ai_tokens,
+                        "max_players": plan.max_players,
+                        "max_arenas": plan.max_arenas,
+                        "max_custom_themes": plan.max_custom_themes,
+                        "api_access": plan.api_access,
+                        "analytics": plan.analytics,
+                        "white_label": plan.white_label,
+                        "priority_support": plan.priority_support,
+                        "period_end": period_end.strftime("%B %d, %Y") if period_end else None,
+                    },
+                )
         
         logger.info(
             f"Created subscription {subscription.id} for org {organization_id} "
