@@ -1360,11 +1360,21 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
             try:
                 access_code_int = int(access_code)
             except (TypeError, ValueError):
+                await websocket.send_json({
+                    "type": "join_rejected",
+                    "payload": {"reason": "invalid_access_code"}
+                })
+                ws_manager.disconnect(str(access_code), websocket)
                 await websocket.close(code=1008)
                 return
 
             arena = db.query(Arena).filter(Arena.access_code == access_code_int).first()
             if not arena:
+                await websocket.send_json({
+                    "type": "join_rejected",
+                    "payload": {"reason": "invalid_access_code"}
+                })
+                ws_manager.disconnect(str(access_code), websocket)
                 await websocket.close(code=1008)
                 return
             
