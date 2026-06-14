@@ -323,7 +323,6 @@ async def get_arena(
         token_info=ArenaTokenInfo(**token_info_dict), # Cast dict to the expected Pydantic model
     )
 
-
 @router.put("/{arena_id}", response_model=ArenaResponse)
 async def update_arena(
     arena_id: int,
@@ -345,7 +344,7 @@ async def update_arena(
             detail="Not authorized to update this arena",
         )
 
-    # Update fields if provided
+    # Update base fields if provided
     if data.arena_name:
         arena.arena_name = data.arena_name
     if data.category:
@@ -377,14 +376,19 @@ async def update_arena(
                 ).first()
                 
                 if existing_q:
-                    # Update existing question (preserve AI token cost from creation)
                     incoming_question_ids.add(q_id)
                     existing_q.prompt_text = q.prompt_text
                     existing_q.time_limit_seconds = q.time_limit_seconds
-                    existing_q.correct_option_index = q.correct_option_index
                     existing_q.point_value = q.point_value
                     existing_q.status = q.status or "ready"
                     existing_q.options_json = [{"text": opt_text} for opt_text in q.options]
+                    
+                    # ✅ FIX 1: Map the missing conditional answer types on update!
+                    existing_q.type = getattr(q, "type", "multiple_choice")
+                    existing_q.correct_option_index = q.correct_option_index
+                    existing_q.correct_answer_string = getattr(q, "correct_answer_string", None)
+                    existing_q.correct_answers = getattr(q, "correct_answers", [])
+                    
                     logger.info(f"Updated existing question {q_id} in arena {arena_id}")
                     continue
             
@@ -398,16 +402,20 @@ async def update_arena(
                 )
                 new_ai_tokens += token_cost
 
+            # ✅ FIX 2: Map the missing fields inside the creation model constructor!
             new_q = Question(
                 arena_id=arena.id,
                 prompt_text=q.prompt_text,
                 time_limit_seconds=q.time_limit_seconds,
-                correct_option_index=q.correct_option_index,
                 point_value=q.point_value,
                 status=q.status or "ready",
                 ai_tokens_cost=token_cost,
                 is_ai_generated=getattr(q, "is_ai_generated", False),
                 options_json=[{"text": opt_text} for opt_text in q.options],
+                type=getattr(q, "type", "multiple_choice"),
+                correct_option_index=q.correct_option_index,
+                correct_answer_string=getattr(q, "correct_answer_string", None),
+                correct_answers=getattr(q, "correct_answers", []),
             )
             db.add(new_q)
 
@@ -418,17 +426,17 @@ async def update_arena(
 
         db.flush()
  
-        # --- THE FIX: ACTUALLY PURGE OMITTED QUESTIONS ---
-        # Find all questions in the DB for this arena that the Frontend left out
-        questions_to_delete = (
-            db.query(Question)
-            .filter(Question.arena_id == arena_id, ~Question.id.in_(incoming_question_ids))
-            .all()
-        )
+        # --- FIX 3: SAFE PURGE OMITTED QUESTIONS WITH BOUNDS ---
+        # Only query with .in_ if incoming_question_ids has elements
+        delete_query = db.query(Question).filter(Question.arena_id == arena_id)
+        if incoming_question_ids:
+            delete_query = delete_query.filter(~Question.id.in_(incoming_question_ids))
+            
+        questions_to_delete = delete_query.all()
         
         for q_to_delete in questions_to_delete: 
             logger.info(f"Removing question {q_to_delete.id} to match frontend state sync")
-            db.delete(q_to_delete) # <-- Hard delete from DB
+            db.delete(q_to_delete)
 
         db.flush()
 
@@ -443,13 +451,13 @@ async def update_arena(
                 tokens_used=new_ai_tokens,
                 operation="arena_question_update",
             )
+            
     db.commit()
     db.refresh(arena)
 
     logger.info(f"Arena {arena_id} updated by host {current_user.user_id}")
 
     return arena
-
 
 @router.delete("/{arena_id}")
 async def delete_arena(
