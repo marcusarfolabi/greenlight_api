@@ -285,23 +285,23 @@ async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db:
     org_name = ""  
 
     # 3. Schedule welcome communication
-    # background_tasks.add_task(
-    #     mail_service.send_welcome_email,
-    #     email=new_user.email,
-    #     name=user_display_name,
-    #     org_name=org_name
-    # )
+    background_tasks.add_task(
+        mail_service.send_welcome_email,
+        email=new_user.email,
+        name=user_display_name,
+        org_name=org_name
+    )
     
     otp_code = f"{secrets.randbelow(9000) + 1000}"
     expire = datetime.utcnow() + timedelta(minutes=15)
         
     otp_cache.set_otp(email=new_user.email, otp=otp_code, expires_at=expire)
-    # background_tasks.add_task(
-    #     mail_service.send_email_confirmation,
-    #     email=new_user.email,
-    #     name=user_display_name,
-    #     otp=otp_code
-    # )
+    background_tasks.add_task(
+        mail_service.send_email_confirmation,
+        email=new_user.email,
+        name=user_display_name,
+        otp=otp_code
+    )
     
     return new_user
 
