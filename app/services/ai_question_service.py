@@ -83,13 +83,58 @@ class AIQuestionGenerationService:
             logger.error(f"Gemini API error: {e}")
             raise ValueError(f"Error generating questions via Gemini: {str(e)}")
 
+    # @staticmethod
+    # def _build_prompt(subject: str, num_questions: int, difficulty: str, language: str) -> str:
+    #     return f"""Generate exactly {num_questions} quiz questions on: "{subject}".
+    #     Difficulty: {difficulty}. Language: {language}.
+    #     Return ONLY a raw JSON array. Do not include markdown formatting or extra text.
+    #     Format: [ {{"prompt_text": "...", "options": ["A", "B", "C", "D"], "correct_option_index": 0, "time_limit_seconds": 30, "point_value": 10}} ]"""
     @staticmethod
     def _build_prompt(subject: str, num_questions: int, difficulty: str, language: str) -> str:
+        # Define localized styling, slang, and dialect injection maps matching frontend selections
+        dialect_rules = {
+            "en": "Write the questions and options cleanly in standard global English.",
+            
+            "en-wa": (
+                "Write the questions and options primarily in English, but heavily infuse popular "
+                "West African dialects, local expressions, and West African Pidgin English context. "
+                "Naturally incorporate terms like 'Chale', 'Abeg', 'Gobe', 'No wahala', or 'Comot' "
+                "where contextually appropriate to make it fun and immersive for a gaming quiz."
+            ),
+            
+            "en-ea": (
+                "Write the questions and options primarily in English, but heavily infuse East African "
+                "colloquialisms, cultural concepts, and popular Sheng/Swahili slang words used in daily conversation. "
+                "Integrate localized expressions like 'Mambo vipi', 'Kuwa mpole', 'Kula raba', 'Chonjo', "
+                "or context referencing local elements like 'Matatus' and 'Bodabodas'."
+            ),
+            
+            "fr": "Write the questions and options cleanly in standard global French.",
+            
+            "fr-wa": (
+                "Write the questions and options primarily in French, but infuse West African French "
+                "colloquialisms and popular slang terms frequently used in urban centers like Abidjan or Douala. "
+                "Integrate vibrant terms like 'Ambianceur', 'Dja', 'Boucan', or 'Chicotter' naturally."
+            )
+        }
+
+        # Fallback to standard tracking text if a generic language code is passed (e.g., 'es', 'de', 'pt')
+        specific_language_rule = dialect_rules.get(
+            language, 
+            f"Write the questions and options cleanly in the specified global language: '{language}'."
+        )
+
         return f"""Generate exactly {num_questions} quiz questions on: "{subject}".
-        Difficulty: {difficulty}. Language: {language}.
-        Return ONLY a raw JSON array. Do not include markdown formatting or extra text.
-        Format: [ {{"prompt_text": "...", "options": ["A", "B", "C", "D"], "correct_option_index": 0, "time_limit_seconds": 30, "point_value": 10}} ]"""
+        Difficulty Level: {difficulty}.
         
+        Linguistic & Dialect Style Rule:
+        {specific_language_rule}
+        
+        CRITICAL OUTPUT FORMAT RULES:
+        Return ONLY a raw JSON array. Do not wrap the JSON output inside markdown block markers like ```json ... ```. Do not include any trailing conversational text or extra metadata outside the array.
+        
+        JSON Structure Format:
+        [ {{"prompt_text": "...", "options": ["A", "B", "C", "D"], "correct_option_index": 0, "time_limit_seconds": 30, "point_value": 10}} ]"""
 
 class QuestionContentService:
     """Service for validating and enriching question content"""
@@ -107,6 +152,9 @@ class QuestionContentService:
 
         if len(question.options) < 2:
             return False, "Question must have at least 2 options"
+
+        if question.correct_option_index is None:
+            return False, "correct_option_index is required"
 
         if question.correct_option_index >= len(question.options):
             return False, "correct_option_index out of range"
