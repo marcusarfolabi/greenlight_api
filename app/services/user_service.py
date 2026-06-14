@@ -93,8 +93,15 @@ class UserService:
             return None
 
         update_data = user_update.model_dump(exclude_unset=True)
+        
+        if "password" in update_data:
+            raw_password = update_data.pop("password")
+            if raw_password:
+                db_user.hashed_password = hash_password(raw_password)
+
         for field, value in update_data.items():
-            setattr(db_user, field, value)
+            if hasattr(db_user, field):
+                setattr(db_user, field, value)
 
         db.add(db_user)
         db.commit()

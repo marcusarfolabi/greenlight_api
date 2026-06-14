@@ -67,6 +67,7 @@ class UserUpdate(BaseModel):
     avatar: Optional[str] = None 
     location: Optional[str] = None 
     is_active: Optional[bool] = None
+    password: Optional[str] = None 
 
 
 class UserResponse(UserBase):
