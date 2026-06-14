@@ -3,7 +3,7 @@ import logging
 from typing import List, Optional
 from app.core.config import settings
 from app.schemas.arena import QuestionSchema
- 
+from google.genai.errors import APIError 
 from google.genai import Client, types
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,6 @@ class AIQuestionGenerationService:
             questions = []
             for q_data in questions_data:
                 try:
-                    # Calculate token cost for this question
                     from app.services.token_service import TokenService
                     token_cost = TokenService.calculate_question_cost(
                         len(q_data.get("prompt_text") or q_data.get("question") or ""),
@@ -79,19 +78,29 @@ class AIQuestionGenerationService:
 
             return questions
 
-        except Exception as e:
-            logger.error(f"Gemini API error: {e}")
-            raise ValueError(f"Error generating questions via Gemini: {str(e)}")
+        except APIError as e:
+            if e.code == 503 or "demand" in str(e).lower() or "temporary" in str(e).lower():
+                user_friendly_msg = "The AI generator is currently packed with traffic. Please wait a moment and try generating again!"
+            elif e.code == 429:
+                user_friendly_msg = "Slow down a bit! Too many generation requests are coming in at once. Try again in a minute."
+            else:
+                user_friendly_msg = f"Gemini system error: {e.message}"
+                
+            logger.error(f"Gemini API structural failure [{e.code}]: {e}")
+            raise ValueError(user_friendly_msg)
 
-    # @staticmethod
+        except Exception as e:
+            logger.error(f"Gemini API unknown error: {e}")
+            raise ValueError("An unexpected issue occurred while styling your questions. Please try again.") # @staticmethod
+    
     # def _build_prompt(subject: str, num_questions: int, difficulty: str, language: str) -> str:
     #     return f"""Generate exactly {num_questions} quiz questions on: "{subject}".
     #     Difficulty: {difficulty}. Language: {language}.
     #     Return ONLY a raw JSON array. Do not include markdown formatting or extra text.
     #     Format: [ {{"prompt_text": "...", "options": ["A", "B", "C", "D"], "correct_option_index": 0, "time_limit_seconds": 30, "point_value": 10}} ]"""
+    
     @staticmethod
     def _build_prompt(subject: str, num_questions: int, difficulty: str, language: str) -> str:
-        # Define localized styling, slang, and dialect injection maps matching frontend selections
         dialect_rules = {
             "en": "Write the questions and options cleanly in standard global English.",
             
