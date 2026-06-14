@@ -62,8 +62,10 @@ class UserUpdate(BaseModel):
     username: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    phone_number: Optional[str] = None # Added field
+    phone_number: Optional[str] = None 
     email: Optional[EmailStr] = None
+    avatar: Optional[str] = None 
+    location: Optional[str] = None 
     is_active: Optional[bool] = None
 
 
@@ -77,7 +79,8 @@ class UserResponse(UserBase):
     owned_organization: Optional[OrganizationResponse] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    phone_number: Optional[str] = None # Added field
+    phone_number: Optional[str] = None 
+    avatar: Optional[str] = None 
     username: str
     email: EmailStr
 

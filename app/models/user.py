@@ -25,6 +25,8 @@ class User(Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(255))
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
     phone_number: Mapped[Optional[str]] = mapped_column(String(255))
+    avatar: Mapped[Optional[str]] = mapped_column(String(255))
+    location: Mapped[Optional[str]] = mapped_column(String(255))
     
     google_id: Mapped[Optional[str]] = mapped_column(String(255))
     linkedin_id: Mapped[Optional[str]] = mapped_column(String(255))
