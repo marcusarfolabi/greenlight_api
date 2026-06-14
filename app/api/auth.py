@@ -361,6 +361,13 @@ async def verify_otp(payload: VerifyOTPRequest, db: Session = Depends(get_db)):
     user = UserService.get_user_by_email(db, payload.email)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User target missing.")
+    
+    if not user.is_active:
+        user.is_active = True
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        logger.info(f"User account activated successfully via registration OTP track: {user.email}")
         
     change_expiry = datetime.utcnow() + timedelta(minutes=5)
     action_token = jwt.encode(
