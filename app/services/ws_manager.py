@@ -14,7 +14,6 @@ class ConnectionManager:
         self.timer_tasks: Dict[str, asyncio.Task] = {}
 
     async def connect(self, access_code: str, websocket: WebSocket):
-        # await websocket.accept()
         conns = self.active.setdefault(access_code, set())
         conns.add(websocket)
         logger.info(

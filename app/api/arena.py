@@ -2,6 +2,7 @@ import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Body, File, Form, UploadFile, BackgroundTasks, WebSocket, WebSocketDisconnect
 import asyncio
+import json
 from datetime import datetime
 from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
@@ -9,9 +10,11 @@ from sqlalchemy.orm import Session
 import io
 import csv
 from PyPDF2 import PdfReader # type: ignore
+import stripe
 
 from app.db.session import get_db
 from app.core.security import get_current_user
+from app.models.organization import ArenaPayoutReport
 from app.schemas.arena import (
     ArenaCreate,
     ArenaResponse,
@@ -36,6 +39,8 @@ from app.services.twilio_service import TwilioService
 from app.services.ws_manager import ws_manager
 from app.core.security import decode_token
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -44,15 +49,15 @@ MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_PDF_PAGES = 50
 
 
-async def _bg_send_sms(to: str, recipient_name: Optional[str], body: str, arena_id: int):
+async def _bg_send_sms(to: str, recipient_name: Optional[str], body: str, arena_access_code: int):
     try:
         ok = await TwilioService.send_sms_arena_access_code_async(to, recipient_name, body)
         if ok:
-            logger.info("Queued SMS sent to %s for arena %s", to, arena_id)
+            logger.info("Queued SMS sent to %s for arena access code %s", to, arena_access_code)
         else:
-            logger.warning("Queued SMS failed to send to %s for arena %s", to, arena_id)
+            logger.warning("Queued SMS failed to send to %s for arena access code %s", to, arena_access_code)
     except Exception:
-        logger.exception("Error sending queued SMS to %s for arena %s", to, arena_id)
+        logger.exception("Error sending queued SMS to %s for arena access code %s", to, arena_access_code)
 
 
 async def _bg_send_email(to: str, recipient_name: Optional[str], subject: str, body: str, arena_details: dict, org_name: Optional[str]):
@@ -118,7 +123,6 @@ async def create_arena(
                 correct_answers=q.correct_answers,
                 correct_answer_string=q.correct_answer_string,
             )
-            logger.debug(f"DEBUG SQLALCHEMY STAGED STRING: {question.correct_answer_string}")
             db.add(question)
 
         db.flush()  # Flush before logging to ensure arena has an ID
@@ -349,7 +353,7 @@ async def update_arena(
     if data.is_public is not None:
         arena.is_public = data.is_public
 
-  # Merge questions if provided (PUT style: Sync exactly what frontend sends)
+    # Merge questions if provided (PUT style: Sync exactly what frontend sends)
     if getattr(data, "questions", None) is not None:
         # Resolve user/org for token accounting
         user = db.query(User).filter(User.id == current_user.user_id).first()
@@ -685,137 +689,6 @@ async def get_organization_players(
     return result
 
 
-@router.post("/{arena_id}/questions/upload")
-async def upload_questions(
-    arena_id: int,
-    file: UploadFile | None = File(None),
-    preview: bool = Form(False),
-    use_ai: bool = Form(False),
-    current_user: AuthContext = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Upload questions for an arena (CSV or JSON). If `preview=true` returns parsed summary without saving."""
-    arena = db.query(Arena).filter(Arena.id == arena_id).first()
-    if not arena:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Arena not found")
-
-    # Only creator can upload questions
-    if arena.creator_id != current_user.user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to upload questions for this arena")
-
-    if not file:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file provided")
-
-    try:
-        content = await file.read()
-        # Enforce file size limit
-        if len(content) > MAX_UPLOAD_SIZE_BYTES:
-            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=f"File too large ({len(content)} bytes). Max allowed size is {MAX_UPLOAD_SIZE_BYTES} bytes")
-
-        # If PDF, check page count before heavy processing
-        if file.filename and file.filename.lower().endswith('.pdf'):
-            try:
-                reader = PdfReader(io.BytesIO(content))
-                num_pages = len(reader.pages)
-                if num_pages > MAX_PDF_PAGES:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"PDF has {num_pages} pages which exceeds the maximum allowed {MAX_PDF_PAGES} pages")
-            except HTTPException:
-                raise
-            except Exception:
-                # If PyPDF2 fails, continue and let parse_questions_file handle extraction/OCR
-                pass
-        parsed, errors = [], []
-
-        if use_ai:
-            # Extract or decode text for AI parsing
-            try:
-                # For docx/pdf we rely on upload_service extractors; otherwise decode bytes
-                text = None
-                if file.filename and file.filename.lower().endswith('.docx'):
-                    from app.services.upload_service import _extract_text_from_docx
-                    text = _extract_text_from_docx(content)
-                elif file.filename and file.filename.lower().endswith('.pdf'):
-                    # try selectable text first
-                    try:
-                        from app.services.upload_service import _extract_text_from_pdf
-                        text = _extract_text_from_pdf(content)
-                    except Exception:
-                        text = ""
-                    if not text or len(text.strip()) < 80:
-                        # try OCR via tesseract or google vision
-                        try:
-                            from app.services.upload_service import _ocr_pdf_with_tesseract
-                            text = _ocr_pdf_with_tesseract(content)
-                        except Exception:
-                            try:
-                                from app.services.upload_service import _ocr_with_google_vision
-                                text = _ocr_with_google_vision(content)
-                            except Exception:
-                                text = ""
-                else:
-                    try:
-                        text = content.decode('utf-8')
-                    except Exception:
-                        try:
-                            text = content.decode('latin-1')
-                        except Exception:
-                            text = ''
-
-                from app.core.config import settings
-                from app.services.upload_service import ai_parse_text_to_questions
-                parsed, errors = ai_parse_text_to_questions(text, settings.GEMINI_API_KEY)
-            except Exception as e:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"AI parse failed: {e}")
-        else:
-            parsed, errors = parse_questions_file(content, file.filename)
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to parse file: {str(e)}")
-
-    if preview:
-        # return a small sample of parsed items for frontend preview
-        sample = []
-        for q in parsed[:10]:
-            try:
-                # pydantic model -> dict
-                sample.append(q.model_dump() if hasattr(q, 'model_dump') else dict(q))
-            except Exception:
-                sample.append({
-                    "prompt_text": getattr(q, 'prompt_text', ''),
-                    "options": getattr(q, 'options', []),
-                    "correct_option_index": getattr(q, 'correct_option_index', 0),
-                })
-        # Calculate AI token estimate for parsed items
-        total_ai_tokens = 0
-        try:
-            user = db.query(User).filter(User.id == current_user.user_id).first()
-            org = user.owned_organization if user else None
-            for q in parsed:
-                if getattr(q, 'is_ai_generated', False):
-                    total_ai_tokens += TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), use_ai_generation=True)
-
-            token_info = {
-                "token_estimate": total_ai_tokens,
-                "can_use": True,
-                "message": None,
-            }
-
-            if total_ai_tokens > 0:
-                if not org:
-                    token_info["can_use"] = False
-                    token_info["message"] = "Organization required for AI token billing"
-                elif not org.use_ai_for_arenas:
-                    token_info["can_use"] = False
-                    token_info["message"] = "AI parsing is not enabled for your organization"
-                else:
-                    can_use, msg = TokenService.can_use_tokens(db, org.id, total_ai_tokens)
-                    token_info["can_use"] = can_use
-                    token_info["message"] = msg
-        except Exception:
-            token_info = {"token_estimate": 0, "can_use": False, "message": "Failed to calculate token estimate"}
-
-        return {"parsed_count": len(parsed), "sample": sample, "errors": errors[:50], "token_info": token_info}
-
-
 @router.post("/questions/upload")
 async def upload_questions_preview(
     file: UploadFile | None = File(None),
@@ -833,7 +706,43 @@ async def upload_questions_preview(
         if len(contents) > MAX_UPLOAD_SIZE_BYTES:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File too large")
 
-        parsed, errors = parse_questions_file(contents, file.filename, use_ai=use_ai)
+        # ✅ FIX: Safe strict string fallback for the filename parameter
+        safe_filename = file.filename or "unknown_file"
+
+        # ✅ FIX: Route the parsing correctly based on whether use_ai is flagged
+        if use_ai:
+            try:
+                text = ""
+                if safe_filename.lower().endswith('.docx'):
+                    from app.services.upload_service import _extract_text_from_docx
+                    text = _extract_text_from_docx(contents)
+                elif safe_filename.lower().endswith('.pdf'):
+                    try:
+                        from app.services.upload_service import _extract_text_from_pdf
+                        text = _extract_text_from_pdf(contents)
+                    except Exception:
+                        text = ""
+                    if not text or len(text.strip()) < 80:
+                        try:
+                            from app.services.upload_service import _ocr_pdf_with_tesseract
+                            text = _ocr_pdf_with_tesseract(contents)
+                        except Exception:
+                            text = ""
+                else:
+                    try:
+                        text = contents.decode('utf-8')
+                    except Exception:
+                        text = contents.decode('latin-1', errors='ignore')
+
+                from app.core.config import settings
+                from app.services.upload_service import ai_parse_text_to_questions
+                parsed, errors = ai_parse_text_to_questions(text, settings.GEMINI_API_KEY)
+            except Exception as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"AI parse failed: {e}")
+        else:
+            # Use the normal file parser function without passing the unsupported 'use_ai' arg
+            parsed, errors = parse_questions_file(contents, safe_filename)
+
     except HTTPException:
         raise
     except Exception as e:
@@ -887,52 +796,145 @@ async def upload_questions_preview(
 
     return {"parsed_count": len(parsed), "sample": sample, "errors": errors[:50], "token_info": token_info}
 
-    # Persist parsed questions (best-effort with transaction)
+
+
+@router.post("/{arena_id}/questions/upload")
+async def upload_questions(
+    arena_id: int,
+    file: UploadFile | None = File(None),
+    preview: bool = Form(False),
+    use_ai: bool = Form(False),
+    current_user: AuthContext = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Upload questions for an arena (CSV or JSON). If `preview=true` returns parsed summary without saving."""
+    arena = db.query(Arena).filter(Arena.id == arena_id).first()
+    if not arena:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Arena not found")
+
+    # Only creator can upload questions
+    if arena.creator_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to upload questions for this arena")
+
+    if not file:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file provided")
+
+    # ✅ FIX: Extract a guaranteed strict string fallback right away
+    safe_filename = file.filename or "unknown_file"
+
     try:
-        # Determine org and token accounting
-        user = db.query(User).filter(User.id == current_user.user_id).first()
-        org = user.owned_organization if user else None
+        content = await file.read()
+        # Enforce file size limit
+        if len(content) > MAX_UPLOAD_SIZE_BYTES:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=f"File too large ({len(content)} bytes). Max allowed size is {MAX_UPLOAD_SIZE_BYTES} bytes")
 
-        total_new_ai_tokens = 0
-        for q in parsed:
-            if org and org.use_ai_for_arenas and q.is_ai_generated:
-                total_new_ai_tokens += TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), use_ai_generation=True)
+        # If PDF, check page count before heavy processing
+        if safe_filename.lower().endswith('.pdf'):
+            try:
+                reader = PdfReader(io.BytesIO(content))
+                num_pages = len(reader.pages)
+                if num_pages > MAX_PDF_PAGES:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"PDF has {num_pages} pages which exceeds the maximum allowed {MAX_PDF_PAGES} pages")
+            except HTTPException:
+                raise
+            except Exception:
+                # If PyPDF2 fails, continue and let parse_questions_file handle extraction/OCR
+                pass
+        parsed, errors = [], [] 
 
-        # If tokens needed, attempt deduction
-        if org and org.use_ai_for_arenas and total_new_ai_tokens > 0:
-            if not TokenService.deduct_tokens(db, org.id, total_new_ai_tokens):
-                raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient tokens to import AI-generated questions")
+        if use_ai:
+            # Extract or decode text for AI parsing
+            try:
+                # For docx/pdf we rely on upload_service extractors; otherwise decode bytes
+                text = None
+                if safe_filename.lower().endswith('.docx'):
+                    from app.services.upload_service import _extract_text_from_docx
+                    text = _extract_text_from_docx(content)
+                elif safe_filename.lower().endswith('.pdf'):
+                    # try selectable text first
+                    try:
+                        from app.services.upload_service import _extract_text_from_pdf
+                        text = _extract_text_from_pdf(content)
+                    except Exception:
+                        text = ""
+                    if not text or len(text.strip()) < 80:
+                        # try OCR via tesseract or google vision
+                        try:
+                            from app.services.upload_service import _ocr_pdf_with_tesseract
+                            text = _ocr_pdf_with_tesseract(content)
+                        except Exception:
+                            try:
+                                from app.services.upload_service import _ocr_with_google_vision
+                                text = _ocr_with_google_vision(content)
+                            except Exception:
+                                text = ""
+                else:
+                    try:
+                        text = content.decode('utf-8')
+                    except Exception:
+                        try:
+                            text = content.decode('latin-1')
+                        except Exception:
+                            text = ''
 
-        # Insert questions
-        for q in parsed:
-            token_cost = TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), use_ai_generation=True) if q.is_ai_generated and org and org.use_ai_for_arenas else 0
-            new_q = Question(
-                arena_id=arena.id,
-                prompt_text=q.prompt_text,
-                time_limit_seconds=q.time_limit_seconds,
-                correct_option_index=q.correct_option_index,
-                point_value=q.point_value,
-                status=q.status or "ready",
-                ai_tokens_cost=token_cost,
-                is_ai_generated=q.is_ai_generated,
-                options_json=[{"text": opt} for opt in q.options],
-            )
-            db.add(new_q)
-
-        if org and org.use_ai_for_arenas and total_new_ai_tokens > 0:
-            arena.ai_tokens_used = (arena.ai_tokens_used or 0) + total_new_ai_tokens
-            TokenService.log_token_usage(db=db, arena_id=arena.id, organization_id=org.id, tokens_used=total_new_ai_tokens, operation="upload_questions")
-
-        db.commit()
-        return {"imported": len(parsed), "failed": len(errors), "errors": errors[:50]}
+                from app.core.config import settings
+                from app.services.upload_service import ai_parse_text_to_questions
+                parsed, errors = ai_parse_text_to_questions(text, settings.GEMINI_API_KEY)
+            except Exception as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"AI parse failed: {e}")
+        else:
+            # ✅ FIX: Passed safe_filename instead of file.filename
+            parsed, errors = parse_questions_file(content, safe_filename)
+            
     except HTTPException:
-        db.rollback()
         raise
     except Exception as e:
-        db.rollback()
-        logger.exception("Failed to import questions: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to import questions")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to parse file: {str(e)}")
 
+    if preview:
+        # return a small sample of parsed items for frontend preview
+        sample = []
+        for q in parsed[:10]:
+            try:
+                # pydantic model -> dict
+                sample.append(q.model_dump() if hasattr(q, 'model_dump') else dict(q))
+            except Exception:
+                sample.append({
+                    "prompt_text": getattr(q, 'prompt_text', ''),
+                    "options": getattr(q, 'options', []),
+                    "correct_option_index": getattr(q, 'correct_option_index', 0),
+                })
+        # Calculate AI token estimate for parsed items
+        total_ai_tokens = 0
+        try:
+            user = db.query(User).filter(User.id == current_user.user_id).first()
+            org = user.owned_organization if user else None
+            for q in parsed:
+                if getattr(q, 'is_ai_generated', False):
+                    total_ai_tokens += TokenService.calculate_question_cost(len(q.prompt_text), len(q.options), use_ai_generation=True)
+
+            token_info = {
+                "token_estimate": total_ai_tokens,
+                "can_use": True,
+                "message": None,
+            }
+
+            if total_ai_tokens > 0:
+                if not org:
+                    token_info["can_use"] = False
+                    token_info["message"] = "Organization required for AI token billing"
+                elif not org.use_ai_for_arenas:
+                    token_info["can_use"] = False
+                    token_info["message"] = "AI parsing is not enabled for your organization"
+                else:
+                    can_use, msg = TokenService.can_use_tokens(db, org.id, total_ai_tokens)
+                    token_info["can_use"] = can_use
+                    token_info["message"] = msg
+        except Exception:
+            token_info = {"token_estimate": 0, "can_use": False, "message": "Failed to calculate token estimate"}
+
+        return {"parsed_count": len(parsed), "sample": sample, "errors": errors[:50], "token_info": token_info}
+    
 @router.get("/{arena_id}/players", response_model=list[PlayerResponse])
 async def get_arena_players(
     arena_id: int,
@@ -984,7 +986,6 @@ async def get_arena_players(
 
     return result
     
-
 @router.post("/{arena_id}/participants/message")
 async def send_participants_message(
     arena_id: int,
@@ -1046,14 +1047,15 @@ async def send_participants_message(
         payload_message = f"{message} Join here: https://greenlight.webshoptechnology.us/arena/{arena.id} with access code {arena.access_code}"
 
         if channel == "sms":
-            background_tasks.add_task(_bg_send_sms, target, recipient_name, payload_message, arena.id)
+            # ✅ FIX: Forced access code to integer fallback to clear 'int | None' mismatch error
+            background_tasks.add_task(_bg_send_sms, target, recipient_name, payload_message, int(arena.access_code or 0))
             queued += 1
         elif channel == "email":
             background_tasks.add_task(_bg_send_email, target, recipient_name, "You're invited to join an arena!", payload_message, {"arena_name": arena.arena_name, "access_code": arena.access_code}, org_name)
             queued += 1
 
     return {"total": len(contacts_list), "queued": queued, "message": "messages queued for background delivery"}
-    
+
 @router.get("/lobby/{access_code}", response_model=LobbyResponse)
 async def get_lobby_info(
     access_code: str,
@@ -1230,7 +1232,115 @@ def get_arena_scoreboard(
     return [PlayerScoreboardResponse.model_validate(entry) for entry in scoreboard_data]
 
 
-@router.websocket("/ws/lobby/{access_code}")
+async def close_arena_and_build_payout_ledger(arena_id: int, db: Session):
+    # 1. Fetch all active participants who completed or played in the arena
+    players = db.query(Player).filter(
+        Player.arena_id == arena_id,
+        Player.status == "completed"
+    ).all()
+    
+    if not players:
+        return
+
+    # 2. Sort players logically by score descending (Break ties using correct answers)
+    # Higher scores first; if scores are equal, player with more correct answers wins
+    sorted_players = sorted(
+        players, 
+        key=lambda p: (p.score or 0, p.correct_answers or 0), 
+        reverse=True
+    )
+
+    # 3. Define your prize pool matrix structure (Example calculation model)
+    # Top 1 gets 50%, Top 2 gets 30%, Top 3 gets 20% of a $50 pool (calculated in cents)
+    prize_pool_cents = 5000 
+    payout_distribution = {1: int(prize_pool_cents * 0.50), 2: int(prize_pool_cents * 0.30), 3: int(prize_pool_cents * 0.20)}
+
+    # 4. Generate the payout records
+    for index, player in enumerate(sorted_players, start=1):
+        current_rank = index
+        
+        # Update operational data inside the core Player model row
+        player.rank = current_rank
+        
+        # Determine if this rank receives cash from your prize matrix
+        payout_reward = payout_distribution.get(current_rank, 0)
+        
+        # Inject structural transaction ledger entry
+        payout_entry = ArenaPayoutReport(
+            arena_id=arena_id,
+            player_id=player.id,
+            username=player.username or f"Player_{player.id}",
+            final_score=player.score or 0,
+            final_rank=current_rank,
+            payout_amount_cents=payout_reward,
+            payout_status="pending" if payout_reward > 0 else "skipped" # Skip processing if they won $0
+        )
+        db.add(payout_entry)
+        
+    db.commit()
+    
+
+
+def process_automated_stripe_payouts(db: Session):
+    """
+    Processes all pending arena payout ledger rows using Stripe Transfers 
+    by resolving recipient routing tokens via PlayerBankingProfile.
+    """
+    pending_payouts = db.query(ArenaPayoutReport).filter(
+        ArenaPayoutReport.payout_status == "pending",
+        ArenaPayoutReport.payout_amount_cents > 0
+    ).all()
+
+    for payout in pending_payouts:
+        try:
+            payout.payout_status = "processing"
+            db.commit()
+
+            banking_profile = payout.player.banking_profile if payout.player else None
+            
+            if not banking_profile:
+                payout.payout_status = "failed"
+                payout.payout_error_message = "Player banking profile details are missing entirely."
+                db.commit()
+                continue
+
+            destination_id = banking_profile.external_recipient_id
+            
+            if not destination_id:
+                payout.payout_status = "failed"
+                payout.payout_error_message = "Missing a valid Stripe connected account destination token."
+                db.commit()
+                continue
+
+            # ✅ FIX: Every single dictionary value cast to strict string for Stripe Type invariance
+            transfer = stripe.Transfer.create(
+                amount=payout.payout_amount_cents,
+                currency="usd",
+                destination=destination_id, 
+                metadata={
+                    "arena_id": str(payout.arena_id),
+                    "player_id": str(payout.player_id),
+                    "player_username": str(payout.username or ""),
+                    "rank": str(payout.final_rank)
+                }
+            )
+
+            # ✅ FIX: Mapped to 'transfer_reference' to match your schema column definitions
+            payout.transfer_reference = transfer.id  
+            payout.payout_status = "paid"
+            payout.processed_at = datetime.utcnow()
+            payout.payout_error_message = None  
+
+        except Exception as stripe_err:
+            db.rollback()
+            payout.payout_status = "failed"
+            payout.payout_error_message = str(stripe_err)
+            logger.exception(f"Stripe API execution failed on payout row ID {payout.id}: {stripe_err}")
+            
+        db.commit()
+        
+        
+router.websocket("/ws/lobby/{access_code}")
 async def lobby_websocket(websocket: WebSocket, access_code: str):
     """WebSocket endpoint for real-time lobby updates and shared countdown."""
     
@@ -1276,7 +1386,6 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
             }
             
             # Send snapshot to all clients for this access code
-            
             await ws_manager.broadcast(str(arena.access_code), payload)
 
             async def _countdown_broadcast(ac, remaining):
@@ -1290,8 +1399,8 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                 if msg_type == "register_player":
                     # Player identifies themselves
                     try:
-                        payload = data.get("payload", {})
-                        player_name = payload.get("player_name")
+                        msg_payload = data.get("payload", {})
+                        player_name = msg_payload.get("player_name")
                         
                         if player_name:
                             # Find player in database by name and arena
@@ -1309,8 +1418,7 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                 
                 elif msg_type == "host_ready":
                     try:
-                        # Removed the user_id check
-                        seconds = int(data.get("seconds", 30))
+                        seconds = int(data.get("seconds", 15))
                         ws_manager.start_countdown(str(arena.access_code), seconds, _countdown_broadcast)
                     except Exception:
                         logger.exception("Error handling host_ready message")
@@ -1331,13 +1439,13 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                         from app.models.player import PlayerAnswerScore
                         from app.models.arena import Question
                         
-                        payload = data.get("payload", {})
-                        question_id = payload.get("question_id")
-                        answer_selected = payload.get("answer_selected")
-                        is_correct = payload.get("is_correct")
-                        time_taken = payload.get("time_taken", 0)
-                        question_time_limit = payload.get("question_time_limit", 0)
-                        max_points = payload.get("max_points", 0)
+                        msg_payload = data.get("payload", {})
+                        question_id = msg_payload.get("question_id")
+                        answer_selected = msg_payload.get("answer_selected")
+                        is_correct = msg_payload.get("is_correct")
+                        time_taken = msg_payload.get("time_taken", 0)
+                        question_time_limit = msg_payload.get("question_time_limit", 0)
+                        max_points = msg_payload.get("max_points", 0)
                         
                         # Calculate score using the formula
                         points_earned = PlayerAnswerScore.calculate_score(
@@ -1405,6 +1513,37 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                     except Exception:
                         logger.exception("Error broadcasting scoreboard on timeout")
 
+                elif msg_type == "end_game" or msg_type == "game_over":
+                    # Securing production pipeline by tracking immutable arena identifier directly 
+                    try:
+                        await close_arena_and_build_payout_ledger(arena_id=arena.id, db=db)
+
+                        final_scoreboard = db.query(Player).filter(
+                            Player.arena_id == arena.id
+                        ).order_by(Player.rank.asc()).all()
+
+                        await ws_manager.broadcast(str(arena.access_code), {
+                            "type": "arena_concluded",
+                            "payload": {
+                                "message": "Game over! Financial payout ledger generated.",
+                                "scoreboard": [
+                                    {
+                                        "username": p.username,
+                                        "score": p.score,
+                                        "rank": p.rank,
+                                        "status": "completed"
+                                    } for p in final_scoreboard
+                                ]
+                            }
+                        })
+                        logger.info(f"Arena {arena.id} safely shut down and final ranking ledger saved.")
+
+                    except Exception as e:
+                        logger.exception(f"Critical payout calculation failure on arena {arena.id}: {e}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "payload": {"detail": "Failed to safely compute and finalize game ranks."}
+                        })
         finally:
             # Proper cleanup of database generator
             try:

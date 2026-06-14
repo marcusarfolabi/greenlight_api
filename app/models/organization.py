@@ -1,9 +1,12 @@
 from typing import TYPE_CHECKING, Optional, List
 from datetime import datetime
-from sqlalchemy import String, ForeignKey, func, Float
+from sqlalchemy import Integer, String, ForeignKey, Text, UniqueConstraint, func, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.models.player import Player
+from app.models.arena import Arena
 from app.models.wallet import Wallet
+
 from .base import Base
 
 if TYPE_CHECKING:
@@ -78,12 +81,46 @@ class Organization(Base):
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(insert_default=func.now(), onupdate=func.now())
 
+class ArenaPayoutReport(Base):
+    """
+    Financial ledger and final ranking snapshot for Arena payouts.
+    Your Stripe payment script queries this table to execute distributions.
+    """
+    __tablename__ = "arena_payout_reports"
 
+    id: Mapped[int] = mapped_column(primary_key=True)
+    arena_id: Mapped[int] = mapped_column(ForeignKey("arenas.id", ondelete="CASCADE"))
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"))
+    
+    # Financial Audit Fields
+    username: Mapped[str] = mapped_column(String(100), nullable=False) # Preserves identity if player account changes
+    final_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    final_rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    
+    # Stripe Integration States
+    payout_amount_cents: Mapped[int] = mapped_column(Integer, default=0) # Store in cents ($10.00 = 1000)
+    payout_status: Mapped[str] = mapped_column(String(20), default="pending") # pending, processing, paid, failed
+    transfer_reference: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    payout_error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    processed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
+
+    # Relationships
+    arena: Mapped["Arena"] = relationship("Arena")
+    player: Mapped["Player"] = relationship("Player")
+
+    __table_args__ = (
+        UniqueConstraint('arena_id', 'player_id', name='_arena_player_payout_uc'),
+    )
+    
+    
 class PayoutRule(Base):
     __tablename__ = "payout_rules"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"))
+    arena_id: Mapped[Optional[int]] = mapped_column(ForeignKey("arenas.id", ondelete="CASCADE"), nullable=True)
     
     position: Mapped[str] = mapped_column(String(50))  # "1st", "2nd", "3rd", "top_5", etc.
     amount: Mapped[float] = mapped_column(Float)  # Amount in dollars
