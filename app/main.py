@@ -7,7 +7,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.openapi.docs import get_swagger_ui_html 
 from fastapi.openapi.utils import get_openapi
 
-
+from sqlalchemy import text 
 load_dotenv(dotenv_path=".env.docker")
 
 from app.api import api_router
@@ -43,11 +43,23 @@ app = FastAPI(
 async def startup_event():
     logger.info("Initializing database and running seeders...")
     try:
-        Base.metadata.drop_all(bind=engine) #temporary testing
+        # 🚨 FORCE WIPE: Disable constraint checks, drop everything, re-enable checks
+        with engine.connect() as connection:
+            # Turn off foreign key checking
+            connection.execute(text("SET session_replication_role = 'replica';"))
+            
+            # Now SQLAlchemy can drop everything without throwing CircularDependencyError
+            Base.metadata.drop_all(bind=engine)
+            
+            # Turn foreign key checking back on
+            connection.execute(text("SET session_replication_role = 'origin';"))
+            connection.commit()
+
+        # Recreate tables cleanly
         Base.metadata.create_all(bind=engine)
         seed_superadmin()
         seed_subscription_plans()
-        # logger.info("Database initialization and seeding complete.")
+        logger.info("Database forcefully wiped, recreated, and seeded fresh!")
     except OperationalError as e:
         logger.error(
             "Database connection failed on startup. "
