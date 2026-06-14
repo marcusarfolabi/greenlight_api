@@ -1,7 +1,7 @@
 from typing import List, Optional, TYPE_CHECKING
 from datetime import datetime
 import enum
-from sqlalchemy import String, Enum, func, ForeignKey
+from sqlalchemy import String, Enum, Text, func, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.wallet import Wallet
@@ -26,7 +26,7 @@ class User(Base):
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
     phone_number: Mapped[Optional[str]] = mapped_column(String(255))
     avatar: Mapped[Optional[str]] = mapped_column(String(255))
-    location: Mapped[Optional[str]] = mapped_column(String(255))
+    location: Mapped[Optional[str]] = mapped_column(Text, nullable=True)    
     
     google_id: Mapped[Optional[str]] = mapped_column(String(255))
     linkedin_id: Mapped[Optional[str]] = mapped_column(String(255))
