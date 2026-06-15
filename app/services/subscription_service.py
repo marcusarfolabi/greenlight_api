@@ -2,12 +2,14 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import BackgroundTasks
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.subscription import Subscription, SubscriptionPlan
 from app.models.organization import Organization
 from app.models.wallet import Transaction, TransactionType, Wallet
 from app.services.mail_service import mail_service
+from app.models.arena import Arena, ArenaTokenUsageLog
 
 logger = logging.getLogger(__name__)
 
@@ -190,8 +192,7 @@ class SubscriptionService:
             }
         
         # Get token usage from arenas and preview logs
-        from app.models.arena import Arena, ArenaTokenUsageLog
-        from sqlalchemy import func
+        
         
         total_used_in_arenas = db.query(Arena).filter(
             Arena.creator_organization_id == organization_id

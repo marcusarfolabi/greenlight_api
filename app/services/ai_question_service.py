@@ -91,13 +91,7 @@ class AIQuestionGenerationService:
 
         except Exception as e:
             logger.error(f"Gemini API unknown error: {e}")
-            raise ValueError("An unexpected issue occurred while styling your questions. Please try again.") # @staticmethod
-    
-    # def _build_prompt(subject: str, num_questions: int, difficulty: str, language: str) -> str:
-    #     return f"""Generate exactly {num_questions} quiz questions on: "{subject}".
-    #     Difficulty: {difficulty}. Language: {language}.
-    #     Return ONLY a raw JSON array. Do not include markdown formatting or extra text.
-    #     Format: [ {{"prompt_text": "...", "options": ["A", "B", "C", "D"], "correct_option_index": 0, "time_limit_seconds": 30, "point_value": 10}} ]"""
+            raise ValueError("An unexpected issue occurred while styling your questions. Please try again.") 
     
     @staticmethod
     def _build_prompt(subject: str, num_questions: int, difficulty: str, language: str) -> str:
@@ -127,7 +121,6 @@ class AIQuestionGenerationService:
             )
         }
 
-        # Fallback to standard tracking text if a generic language code is passed (e.g., 'es', 'de', 'pt')
         specific_language_rule = dialect_rules.get(
             language, 
             f"Write the questions and options cleanly in the specified global language: '{language}'."
