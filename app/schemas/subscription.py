@@ -100,3 +100,24 @@ class SubscriptionResponse(SubscriptionBase):
 class SubscriptionWithPlanDetails(SubscriptionResponse):
     """Subscription response with full plan details"""
     pass
+
+
+from typing import Any
+
+# 1. This handles the subscription database conversion cleanly
+class SubscriptionPayloadResponse(SubscriptionBase):
+    id: int
+    stripe_subscription_id: Optional[str] = None
+    stripe_customer_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# 2. This matches your composite controller return dictionary
+class SubscriptionAuthWrapperResponse(BaseModel):
+    subscription: SubscriptionPayloadResponse
+    access_token: str
+    token_type: str
+    user: Any  # Replace with your User response schema if preferred

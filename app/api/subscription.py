@@ -12,6 +12,7 @@ from app.models.organization import Organization
 from app.schemas.subscription import (
     ConfirmPaymentRequest,
     CreatePaymentIntentRequest,
+    SubscriptionAuthWrapperResponse,
     SubscriptionPlanResponse,
     SubscriptionResponse,
     SubscriptionCreate,
@@ -118,7 +119,7 @@ async def get_organization_subscription(
     return subscription
 
 
-@router.post("", response_model=SubscriptionPlanResponse)
+@router.post("", response_model=SubscriptionAuthWrapperResponse)
 async def create_subscription(
     subscription_data: SubscriptionCreate,
     background_tasks: BackgroundTasks,
