@@ -225,8 +225,8 @@ class StripeConnectService:
             "configuration": {
                 "recipient": {
                     "capabilities": {
-                        # Enables platform balance transfers to this account for future payouts
-                        "stripe_balance.stripe_transfers": {"requested": True}
+                        "bank_accounts.local": {"requested": True},  
+                        "cards": {"requested": True}  
                     }
                 }
             },
@@ -236,7 +236,7 @@ class StripeConnectService:
                     "losses_collector": "application",
                 },
             },
-            "dashboard": "express",  # 👈 Changed from 'full' to 'express' to fix the error
+            "dashboard": "express",   
             "metadata": {
                 "organization_id": str(org.id),
                 "subdomain": org.subdomain,
