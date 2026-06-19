@@ -260,26 +260,32 @@ class StripeConnectService:
     ) -> Organization:
         """
         Creates a new Stripe Connect account using the universally supported V1 API,
-        preventing regional configuration errors for international organizations (e.g., KE).
+        properly configuring an Express dashboard configuration via the controller block.
         """
         if org.stripe_connect_id:
             return org
 
+        # 1. Initialize global V1 settings client
         StripeConnectService._client()
 
+        # 2. Extract country string cleanly, standardize it, and determine ISO code (Uppercase for V1)
         db_country = (org.country or "").strip().lower()
         if len(db_country) == 2:
             iso_country = db_country.upper()
         else:
             iso_country = COUNTRY_NAME_TO_ISO.get(db_country, "GB").upper()
 
+        # 3. Configure the controller params strictly according to the V1 specifications
+        # Adding dashboard: express tells Stripe how to combine fees/losses collection safely
         controller_params = cast(Any, {
             "fees": {"payer": "application"},
             "losses": {"payments": "application"},
             "requirement_collection": "stripe",
+            "dashboard": {"type": "express"},  # 👈 Added this to explicitly avoid the "full dashboard" error
         })
         
         try:
+            # 4. Create the account with the dashboard definition nested inside the controller
             account = stripe.Account.create(
                 country=iso_country,
                 email=owner_email,
@@ -299,6 +305,7 @@ class StripeConnectService:
                 exc, f"Unable to create Stripe Connect account for country {iso_country}."
             )
 
+        # 5. Save the generated Account ID directly to your database
         org.stripe_connect_id = account.id
         db.commit()
         db.refresh(org)
