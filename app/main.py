@@ -58,8 +58,8 @@ async def startup_event():
 
         # Recreate tables cleanly from scratch
         Base.metadata.create_all(bind=engine)
-        # seed_superadmin()
-        # seed_subscription_plans()
+        seed_superadmin()
+        seed_subscription_plans()
         logger.info("Database forcefully wiped, recreated, and seeded fresh!")
     except OperationalError as e:
         logger.error(
