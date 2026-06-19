@@ -1,10 +1,6 @@
 import logging
-import os
-from datetime import datetime, timedelta
-from typing import Optional
-from pydantic import BaseModel
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import stripe  # type: ignore
 
@@ -31,7 +27,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def set_auth_cookie(response: Response, db: Session, user_id: int) -> dict:
+def generate_auth_payload(db: Session, user_id: int) -> dict:
+    """
+    Generates a new token containing updated subscription details.
+    Returns the bearer payload directly for native client context integration.
+    """
     user = UserService.get_user(db, user_id)
     if not user:
         raise HTTPException(
@@ -52,18 +52,6 @@ def set_auth_cookie(response: Response, db: Session, user_id: int) -> dict:
     }
 
     access_token = create_access_token(data=token_data)
-    is_production = os.getenv("ENVIRONMENT") == "production"
-
-    response.set_cookie(
-        key="auth_token",
-        value=access_token,
-        httponly=True,
-        secure=is_production,
-        samesite="lax",
-        domain=".webshoptechnology.us" if is_production else "localhost",
-        max_age=21600,
-        path="/",
-    )
 
     user_data = {
         "id": user.id,
@@ -78,7 +66,11 @@ def set_auth_cookie(response: Response, db: Session, user_id: int) -> dict:
     if has_org:
         user_data["subdomain"] = UserService.user_sub_domain(db, user.id)
 
-    return {"access_token": access_token, "user": user_data}
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "user": user_data
+    }
 
 
 @router.get("/plans", response_model=list[SubscriptionPlanResponse])
@@ -110,7 +102,6 @@ async def get_plan(plan_id: int, db: Session = Depends(get_db)):
 async def get_organization_subscription( 
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    
 ):
     """Get the current subscription for an organization"""
     subscription = db.query(Subscription).filter(
@@ -127,11 +118,10 @@ async def get_organization_subscription(
     return subscription
 
 
-@router.post("", response_model=SubscriptionResponse)
+@router.post("", response_model=dict)
 async def create_subscription(
     subscription_data: SubscriptionCreate,
     background_tasks: BackgroundTasks,
-    response: Response,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(get_current_user)
 ):
@@ -154,7 +144,7 @@ async def create_subscription(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Subscription plan not found"
         )
-     
+         
     subscription = SubscriptionService.create_subscription(
         db=db,
         organization_id=auth.org_id,
@@ -164,9 +154,15 @@ async def create_subscription(
         background_tasks=background_tasks,
     )
 
-    set_auth_cookie(response, db, auth.user_id)
+    # Generate explicit authorization payload containing updated permissions 
+    auth_payload = generate_auth_payload(db, auth.user_id)
     
-    return subscription
+    return {
+        "subscription": subscription,
+        "access_token": auth_payload["access_token"],
+        "token_type": auth_payload["token_type"],
+        "user": auth_payload["user"]
+    }
 
 
 @router.post("/payment-intent")
@@ -177,14 +173,12 @@ async def create_payment_intent(
 ):
     """Create a Stripe Payment Intent for embedded payment element"""
     
-    # Verify user has a valid organization
     if not auth.org_id or auth.org_id == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User must belong to an organization to create a payment intent"
         )
     
-    # Verify plan exists
     plan = db.query(SubscriptionPlan).filter(
         SubscriptionPlan.id == request.plan_id,
         SubscriptionPlan.is_active == True
@@ -196,14 +190,12 @@ async def create_payment_intent(
             detail="Subscription plan not found or inactive"
         )
     
-    # Free plan should use direct subscription
     if plan.price == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Use the subscription endpoint for free plans"
         )
     
-    # Verify organization exists
     organization = db.query(Organization).filter(
         Organization.id == auth.org_id
     ).first()
@@ -223,7 +215,6 @@ async def create_payment_intent(
     stripe.api_key = settings.STRIPE_SECRET_KEY
     
     try:
-        # Check if organization already has a Stripe customer
         existing_subscription = db.query(Subscription).filter(
             Subscription.organization_id == auth.org_id
         ).first()
@@ -231,7 +222,6 @@ async def create_payment_intent(
         if existing_subscription and existing_subscription.stripe_customer_id:
             stripe_customer_id = existing_subscription.stripe_customer_id
         else:
-            # Create new customer
             customer = stripe.Customer.create(
                 name=organization.name,
                 metadata={
@@ -240,10 +230,8 @@ async def create_payment_intent(
             )
             stripe_customer_id = customer.id
         
-        # Amount in cents
         amount = int(plan.price * 100)
         
-        # Create Payment Intent
         payment_intent = stripe.PaymentIntent.create(
             amount=amount,
             currency=plan.currency,
@@ -272,13 +260,11 @@ async def create_payment_intent(
 async def confirm_payment(
     request: ConfirmPaymentRequest,
     background_tasks: BackgroundTasks,
-    response: Response,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(get_current_user)
 ):
     """Confirm payment and create subscription after successful payment"""
     
-    # Verify plan exists
     plan = db.query(SubscriptionPlan).filter(
         SubscriptionPlan.id == request.plan_id
     ).first()
@@ -289,7 +275,6 @@ async def confirm_payment(
             detail="Subscription plan not found"
         )
     
-    # Verify organization exists
     organization = db.query(Organization).filter(
         Organization.id == auth.org_id
     ).first()
@@ -319,7 +304,6 @@ async def confirm_payment(
         
         stripe_customer_id = str(payment_intent.customer) if payment_intent.customer else None
         
-        # Create subscription using service (handles token allocation and canceling old subscriptions)
         subscription = SubscriptionService.create_subscription(
             db=db,
             organization_id=auth.org_id,
@@ -329,7 +313,8 @@ async def confirm_payment(
             background_tasks=background_tasks,
         )
 
-        auth_payload = set_auth_cookie(response, db, auth.user_id)
+        # Build fresh payload containing newly minted subscription variables
+        auth_payload = generate_auth_payload(db, auth.user_id)
         
         logger.info(f"Subscription created for org {auth.org_id} on plan {request.plan_id}")
         
@@ -337,6 +322,8 @@ async def confirm_payment(
             "success": True,
             "message": "Subscription activated successfully",
             "subscription_id": subscription.id,
+            "access_token": auth_payload["access_token"],
+            "token_type": auth_payload["token_type"],
             "user": auth_payload["user"],
         }
     

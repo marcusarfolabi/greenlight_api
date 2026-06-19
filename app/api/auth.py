@@ -2,7 +2,7 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Response, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Form
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 
@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 @router.post("/login")
 async def login(
-    response: Response,
     username: str = Form(...),   
     password: str = Form(...),   
     db: Session = Depends(get_db)
@@ -39,7 +38,6 @@ async def login(
     hasOrg = UserService.user_has_org(db, user.id)
     org_id = UserService.get_user_org_id(db, user.id) if hasOrg else None
 
-    # Explicitly check that org_id is not None before passing it
     hasSub = False
     if org_id is not None:
         hasSub = UserService.user_has_subscription(db, org_id)
@@ -49,24 +47,16 @@ async def login(
         "role": user.role,
         "username": user.username,
         "org_id": org_id,
-        "has_subscription": hasSub  # Included in JWT payload if your frontend needs it from token decryption
+        "has_subscription": hasSub
     }
     
     access_token = create_access_token(data=token_data)
-    is_production = os.getenv("ENVIRONMENT") == "production"
-    
-    response.set_cookie(
-        key="auth_token",
-        value=access_token,
-        httponly=True,
-        secure=is_production,
-        samesite="lax",        
-        domain=".webshoptechnology.us" if is_production else "localhost",
-        max_age=21600,
-        path="/"
-    )
+    refresh_token = create_refresh_token(data={"sub": str(user.id)})
     
     response_data = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
         "user": {
             "id": user.id,
             "username": user.username,
@@ -74,7 +64,7 @@ async def login(
             "role": user.role,
             "hasOrg": hasOrg,
             "org_id": org_id,
-            "hasSub": hasSub  # Included in the explicit JSON response payload
+            "hasSub": hasSub
         }
     }
     
@@ -82,12 +72,11 @@ async def login(
         subdomain = UserService.user_sub_domain(db, user.id)
         response_data["user"]["subdomain"] = subdomain
     
-    response.status_code = 200
     return response_data
+
 
 @router.post("/refresh-token")
 async def refresh_user_token(
-    response: Response,
     current_user: AuthContext = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -111,21 +100,10 @@ async def refresh_user_token(
     }
 
     access_token = create_access_token(token_data)
-    is_production = os.getenv("ENVIRONMENT") == "production"
-    
-    response.set_cookie(
-        key="auth_token",
-        value=access_token,
-        httponly=True,
-        secure=is_production,
-        samesite="lax",        
-        domain=".webshoptechnology.us" if is_production else "localhost",
-        max_age=21600,
-        path="/"
-    )
 
     return {
         "access_token": access_token,
+        "token_type": "bearer",
         "user": {
             "id": db_user.id,
             "username": db_user.username,
@@ -140,7 +118,6 @@ async def refresh_user_token(
 
 @router.post("/google")
 async def auth_google(
-    response: Response, 
     payload: GoogleTokenPayload, 
     background_tasks: BackgroundTasks,   
     db: Session = Depends(get_db)
@@ -165,8 +142,6 @@ async def auth_google(
 
         user = UserService.get_user_by_google_id(db, google_id)
         
-        user = UserService.get_user_by_email(db, email)
-
         if not user:
             user = UserService.get_user_by_email(db, email)
             if user:
@@ -207,7 +182,6 @@ async def auth_google(
         hasOrg = UserService.user_has_org(db, user.id)
         org_id = UserService.get_user_org_id(db, user.id) if hasOrg else None
         
-        # Guard against passing None to subscription check
         hasSub = False
         if org_id is not None:
             hasSub = UserService.user_has_subscription(db, org_id)
@@ -220,24 +194,12 @@ async def auth_google(
             "has_subscription": hasSub
         }
 
-        # ============ BAKE COOKIES (MATCHES LOGIN ROUTE) ============
         access_token = create_access_token(token_data)
-        is_production = os.getenv("ENVIRONMENT") == "production"
-        
-        response.set_cookie(
-            key="auth_token",
-            value=access_token,
-            httponly=True,
-            secure=is_production,
-            samesite="lax",        
-            domain=".webshoptechnology.us" if is_production else "localhost",
-            max_age=21600,
-            path="/"
-        )
+        refresh_token = create_refresh_token({"sub": str(user.id)})
 
         response_data = {
             "access_token": access_token,
-            "refresh_token": create_refresh_token({"sub": str(user.id)}),
+            "refresh_token": refresh_token,
             "token_type": "bearer",
             "user": {
                 "id": user.id,
@@ -252,11 +214,9 @@ async def auth_google(
             }
         }
 
-        # Include subdomain if workspace is configured
         if hasOrg:
             response_data["user"]["subdomain"] = UserService.user_sub_domain(db, user.id)
 
-        response.status_code = 200
         return response_data
 
     except ValueError:
@@ -264,6 +224,7 @@ async def auth_google(
             status_code=status.HTTP_401_UNAUTHORIZED, 
             detail="Invalid Google OAuth token signature or token expired"
         )
+        
         
 @router.post("/register", response_model=UserResponse)
 async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -284,7 +245,6 @@ async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db:
     user_display_name = user_data.first_name or new_user.username
     org_name = ""  
 
-    # 3. Schedule welcome communication
     background_tasks.add_task(
         mail_service.send_welcome_email,
         email=new_user.email,
@@ -305,9 +265,9 @@ async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db:
     
     return new_user
 
+
 @router.post("/resend-otp")
 async def resend_otp(payload: ResendOTPRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """Resend a new verification code to the user's email."""
     user = UserService.get_user_by_email(db, payload.email)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
@@ -328,7 +288,6 @@ async def resend_otp(payload: ResendOTPRequest, background_tasks: BackgroundTask
  
 @router.post("/forgot-password")
 async def forgot_password(payload: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """Check email existence and generate a cryptographically signed recovery token."""
     user = UserService.get_user_by_email(db, payload.email)
      
     if user:
@@ -347,9 +306,9 @@ async def forgot_password(payload: ForgotPasswordRequest, background_tasks: Back
          
     return {"detail": "If the email is registered, a password recovery code has been generated."}
 
+
 @router.post("/verify-otp")
 async def verify_otp(payload: VerifyOTPRequest, db: Session = Depends(get_db)):
-    """Checks cache validation accuracy. Destroys entry on match and returns a transient payload modifier token.""" 
     is_valid = otp_cache.verify_and_destroy_otp(email=payload.email, incoming_otp=payload.otp)
     
     if not is_valid:
@@ -381,9 +340,9 @@ async def verify_otp(payload: VerifyOTPRequest, db: Session = Depends(get_db)):
         "reset_token": action_token
     }
 
+
 @router.post("/reset-password")
 async def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
-    """Accept the validated verification token payload block and securely update database password entries."""
     try:
         decoded_token = jwt.decode(
             payload.token, 
@@ -402,7 +361,6 @@ async def reset_password(payload: ResetPasswordRequest, db: Session = Depends(ge
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user profile record missing.")
             
-        # Complete secure parameter data mutations
         user.hashed_password = hash_password(payload.new_password)
         db.add(user)
         db.commit()
@@ -418,12 +376,9 @@ async def reset_password(payload: ResetPasswordRequest, db: Session = Depends(ge
         
         
 @router.post("/logout")
-async def logout(response: Response):
-    is_production = os.getenv("ENVIRONMENT") == "production"
-    
-    response.delete_cookie(
-        key="auth_token",
-        path="/", 
-        domain=".webshoptechnology.us" if is_production else "localhost",
-    )
-    return {"detail": "Successfully logged out and session context revoked."}
+async def logout():
+    """
+    Stateless JWT logging out relies on the client destroying the token.
+    We simply return a success acknowledgment.
+    """
+    return {"detail": "Successfully logged out. Please clear token context parameters on the client layer."}

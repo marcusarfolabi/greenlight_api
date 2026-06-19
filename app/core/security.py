@@ -1,9 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi.security import APIKeyCookie
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 
@@ -12,12 +11,7 @@ from app.schemas.user import AuthContext
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 security = HTTPBearer()
-from fastapi import Request # Add this import
 
-cookie_scheme = APIKeyCookie(
-name="auth_token",
-auto_error=False
-)
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
@@ -58,46 +52,23 @@ def create_password_reset_token(user_id: int) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=15)  # Link expires in 15 mins
     to_encode = {"sub": str(user_id), "exp": expire, "action": "password_reset"}
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
-    
 
 
-# async def get_current_user(request: Request) -> AuthContext:
-#     token = request.cookies.get("auth_token")
-#     if not token:
-#         raise HTTPException(status_code=401, detail="Not authenticated")
-    
-#     payload = decode_token(token)
-#     user_id = payload.get("sub")
-    
-#     if user_id is None:
-#         raise HTTPException(status_code=401, detail="Invalid token payload")
-
-#     # Return the structured model
-#     return AuthContext(
-#         token=token,
-#         user_id=int(user_id),
-#         role=payload.get("role", "user"),
-#         username=payload.get("username", "")
-#     )
-
-async def get_current_user(request: Request) -> AuthContext:
-
-    token = request.cookies.get("auth_token")
-    
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated"
-        )
-
+async def get_current_user(
+    auth: HTTPAuthorizationCredentials = Depends(security)
+) -> AuthContext:
+    """
+    Extracts the bearer token cleanly out of the Authorization header, Decodes it,
+    and yields the mapped local structured application authorization model.
+    """
+    token = auth.credentials  # This parses out just the raw token text string
     payload = decode_token(token)
 
     user_id = payload.get("sub")
-
     if user_id is None:
         raise HTTPException(
-            status_code=401,
-            detail="Invalid token payload"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload layout context."
         )
 
     org_id = payload.get("org_id")

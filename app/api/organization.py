@@ -1,19 +1,17 @@
 import logging
-import os
-from fastapi import APIRouter, Depends, HTTPException, status, Response 
+from app.models.arena import Arena
+from fastapi import APIRouter, Depends, HTTPException, status 
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.core.security import create_access_token, get_current_user  
 
 from app.schemas.organization import (
-    OrganizationCreate, OrganizationResponse, 
-    OrgSettingsUpdate, OrgSettingsResponse, OrgSettingsSaveResponse,
+    OrganizationCreate, OrgSettingsUpdate, OrgSettingsResponse, OrgSettingsSaveResponse,
     PayoutRuleCreate, PayoutRuleResponse,
     WalletSummaryResponse,
 )
 from app.services.stripe_connect import StripeConnectService
-from app.models.user import UserRole
 from app.models.organization import PayoutRule
 from app.services.user_service import UserService           
 from app.services.organization import OrganizationService
@@ -24,10 +22,9 @@ router = APIRouter()
 logger = logging.getLogger(__name__) 
 
 
-@router.post("", response_model=OrganizationResponse)
+@router.post("")
 async def setup_user_organization(
     org_data: OrganizationCreate, 
-    response: Response, 
     db: Session = Depends(get_db), 
     auth: AuthContext = Depends(get_current_user)
 ):
@@ -39,24 +36,20 @@ async def setup_user_organization(
             status_code=status.HTTP_404_NOT_FOUND, detail="User account not found."
         )
 
-    # if auth.role != UserRole.HOST.value:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_403_FORBIDDEN,
-    #         detail="Only accounts configured with a HOST role can construct workspace domains."
-    #     )
-
     if OrganizationService.get_by_subdomain(db, org_data.subdomain):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Organization workspace subdomain already taken",
         )
 
+    # Create the new organization
     new_org = OrganizationService.create_organization_for_user(
         db=db, user_id=auth.user_id, org_data=org_data
     )
     
     hasSub = UserService.user_has_subscription(db, new_org.id)
     
+    # Pack the freshly created org_id into the new JWT payload
     token_data = {
         "sub": str(user.id),
         "role": user.role,
@@ -66,20 +59,26 @@ async def setup_user_organization(
     }
     
     access_token = create_access_token(data=token_data)
-    is_production = os.getenv("ENVIRONMENT") == "production"
     
-    response.set_cookie(
-        key="auth_token",
-        value=access_token,
-        httponly=True,
-        secure=is_production,
-        samesite="lax",        
-        domain=".webshoptechnology.us" if is_production else "localhost",
-        max_age=21600,
-        path="/"
-    )
+    # Construct an updated user profile layout block for the frontend
+    user_data = {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "role": user.role,
+        "hasOrg": True,
+        "org_id": new_org.id,
+        "hasSub": hasSub,
+        "subdomain": new_org.subdomain
+    }
     
-    return new_org
+    # Return everything explicitly via JSON
+    return {
+        "organization": new_org,
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user_data
+    }
 
 @router.get("/wallet", response_model=WalletSummaryResponse)
 async def get_organization_wallet(
@@ -309,3 +308,36 @@ async def delete_payout_rule(
     
     db.delete(rule)
     db.commit()
+    
+    
+@router.get("/arena-settings", response_model=OrgSettingsResponse)
+async def get_organization_arena_settings(
+    access_code: int,
+    db: Session = Depends(get_db),
+):
+    arena = (
+        db.query(Arena)
+        .filter(Arena.access_code == access_code)
+        .first()
+    )
+    if not arena:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Arena not found"
+        )
+    if not arena.creator_organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Arena is not linked to an organization"
+        )
+    """Retrieve all organization settings (branding, visibility, payouts)"""
+    org = OrganizationService.get_by_owner(db, arena.creator_id)
+
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found"
+        )
+
+    return OrganizationService.build_settings_response(org)
+
