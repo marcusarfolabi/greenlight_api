@@ -118,7 +118,7 @@ async def get_organization_subscription(
     return subscription
 
 
-@router.post("", response_model=dict)
+@router.post("", response_model=SubscriptionPlanResponse)
 async def create_subscription(
     subscription_data: SubscriptionCreate,
     background_tasks: BackgroundTasks,
