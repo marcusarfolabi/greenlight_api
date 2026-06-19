@@ -259,8 +259,8 @@ class StripeConnectService:
         owner_email: str,
     ) -> Organization:
         """
-        Creates a new Stripe Connect account using the universally supported V1 API,
-        properly configuring an Express dashboard configuration via the controller block.
+        Creates a new Stripe Connect account using the globally stable V1 API with 
+        explicit Express layout configurations.
         """
         if org.stripe_connect_id:
             return org
@@ -275,23 +275,20 @@ class StripeConnectService:
         else:
             iso_country = COUNTRY_NAME_TO_ISO.get(db_country, "GB").upper()
 
-        # 3. Configure the controller params strictly according to the V1 specifications
-        # Adding dashboard: express tells Stripe how to combine fees/losses collection safely
-        controller_params = cast(Any, {
-            "fees": {"payer": "application"},
-            "losses": {"payments": "application"},
-            "requirement_collection": "stripe",
-            "dashboard": {"type": "express"},  # 👈 Added this to explicitly avoid the "full dashboard" error
-        })
-        
         try:
-            # 4. Create the account with the dashboard definition nested inside the controller
+            # 3. Use the stable flat V1 schema pattern for Express accounts
             account = stripe.Account.create(
+                type="express",  # Standard global definition for platform-managed accounts
                 country=iso_country,
                 email=owner_email,
-                controller=controller_params,
                 capabilities={
-                    "transfers": {"requested": True},
+                    "transfers": {"requested": True}, # Essential for platform payouts
+                },
+                # Settings structure defining application collection control in V1
+                settings={
+                    "payouts": {
+                        "debit_negative_balances": True, # Platform-backed losses relationship
+                    }
                 },
                 business_type="individual",
                 metadata={
@@ -305,11 +302,12 @@ class StripeConnectService:
                 exc, f"Unable to create Stripe Connect account for country {iso_country}."
             )
 
-        # 5. Save the generated Account ID directly to your database
+        # 4. Save the generated Account ID directly to your database
         org.stripe_connect_id = account.id
         db.commit()
         db.refresh(org)
         return org
+    
     
     @staticmethod
     def create_onboarding_link(org: Organization) -> str:
