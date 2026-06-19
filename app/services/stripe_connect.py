@@ -240,7 +240,6 @@ class StripeConnectService:
         })
 
         try:
-            # 5. Dispatch exactly matching payload parameters
             account = client.v2.core.accounts.create(params=v2_params)
         except stripe.StripeError as exc:
             StripeConnectService._raise_stripe_error(
