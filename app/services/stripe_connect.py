@@ -265,17 +265,14 @@ class StripeConnectService:
         if org.stripe_connect_id:
             return org
 
-        # 1. Initialize global V1 settings client
         StripeConnectService._client()
 
-        # 2. Extract country string cleanly, standardize it, and determine ISO code (V1 expects UPPERCASE)
         db_country = (org.country or "").strip().lower()
         if len(db_country) == 2:
             iso_country = db_country.upper()
         else:
             iso_country = COUNTRY_NAME_TO_ISO.get(db_country, "GB").upper()
 
-        # 3. Configure the parameters exactly according to the universally available V1 specifications
         controller_params = cast(Any, {
             "fees": {"payer": "application"},
             "losses": {"payments": "application"},
@@ -283,14 +280,12 @@ class StripeConnectService:
         })
         
         try:
-            # 4. Use standard V1 endpoint structure (stripe.Account.create) instead of v2 client
             account = stripe.Account.create(
-                type="express",
                 country=iso_country,
                 email=owner_email,
                 controller=controller_params,
                 capabilities={
-                    "transfers": {"requested": True}, # 👈 Fully supported worldwide in V1 for payouts
+                    "transfers": {"requested": True},
                 },
                 business_type="individual",
                 metadata={
@@ -304,7 +299,6 @@ class StripeConnectService:
                 exc, f"Unable to create Stripe Connect account for country {iso_country}."
             )
 
-        # 5. Save the generated V1 Account ID directly to your database
         org.stripe_connect_id = account.id
         db.commit()
         db.refresh(org)
