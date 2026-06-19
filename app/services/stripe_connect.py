@@ -187,44 +187,46 @@ class StripeConnectService:
                 detail="Stripe is not configured. Set STRIPE_SECRET_KEY on the server.",
             )
         
-        # 1. Instantiate the V2 compatible client engine
         client = stripe.StripeClient(settings.STRIPE_SECRET_KEY)
 
-        # 2. Extract country string cleanly, standardize it, and determine ISO code
+        # Extract country string cleanly, standardize it, and determine ISO code
         db_country = (org.country or "").strip().lower()
         if len(db_country) == 2:
             iso_country = db_country
         else:
             iso_country = COUNTRY_NAME_TO_ISO.get(db_country, "gb")
 
-        # 3. Build structural business verification blocks dynamically
+        # Build structural business verification blocks dynamically
         business_details: dict[str, Any] = {
             "registered_name": org.name,
         }
 
-        # Handle complete address payload injection
-        address_payload: dict[str, str] = {}
+        # Build address block if info exists
+        # NOTE: Stripe V2 demands 'country' inside the address dictionary if address is passed
+        address_payload: dict[str, str] = {
+            "country": iso_country  # 👈 Added to resolve 'Required request field missing'
+        }
         if org.city:
             address_payload["city"] = org.city
         if org.state:
             address_payload["state"] = org.state
         
-        if address_payload:
+        # Only bind the address dictionary if you actually have data beyond just the country
+        if org.city or org.state:
             business_details["address"] = address_payload
- 
+
+        # Construct complete schema payload for Accounts V2
         v2_params = cast(Any, {
             "contact_email": owner_email,
             "display_name": org.name,
             "identity": {
                 "country": iso_country,
-                "entity_type": "individual",   
+                "entity_type": "individual",  
                 "business_details": business_details,
             },
             "configuration": {
                 "merchant": {
-                    "capabilities": { 
-                        "transfers": {"requested": True} 
-                    }
+                    
                 }
             },
             "defaults": {
@@ -241,18 +243,17 @@ class StripeConnectService:
             },
         })
 
-        try: 
+        try:
             account = client.v2.core.accounts.create(params=v2_params)
-        except stripe.StripeError as exc: 
+        except stripe.StripeError as exc:
             StripeConnectService._raise_stripe_error(
                 exc, f"Unable to create Stripe Connect account via V2 for country {iso_country}."
             )
- 
+
         org.stripe_connect_id = account.id
         db.commit()
         db.refresh(org)
         return org
-    
     @staticmethod
     def create_onboarding_link(org: Organization) -> str:
         if not org.stripe_connect_id:
