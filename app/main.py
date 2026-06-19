@@ -44,17 +44,17 @@ async def startup_event():
     logger.info("Initializing database and running seeders...")
     try:
         # 🚨 FORCE WIPE: Disable constraint checks, drop everything, re-enable checks
-        with engine.begin() as connection:
-            # Grab all table names registered in your SQLAlchemy Base models
-            table_names = ", ".join([f'"{table.name}"' for table in Base.metadata.sorted_tables])
+        # with engine.begin() as connection:
+            # # Grab all table names registered in your SQLAlchemy Base models
+            # table_names = ", ".join([f'"{table.name}"' for table in Base.metadata.sorted_tables])
             
-            if table_names:
-                logger.info(f"Force dropping tables: {table_names}")
-                # CASCADE forces Postgres to drop tables regardless of circular foreign keys
-                connection.execute(text(f"DROP TABLE IF EXISTS {table_names} CASCADE;"))
-                logger.info("Database cleanly wiped via raw CASCADE.")
-            else:
-                logger.info("No tables discovered to drop.")
+            # if table_names:
+            #     logger.info(f"Force dropping tables: {table_names}")
+            #     # CASCADE forces Postgres to drop tables regardless of circular foreign keys
+            #     connection.execute(text(f"DROP TABLE IF EXISTS {table_names} CASCADE;"))
+            #     logger.info("Database cleanly wiped via raw CASCADE.")
+            # else:
+            #     logger.info("No tables discovered to drop.")
 
         # Recreate tables cleanly from scratch
         Base.metadata.create_all(bind=engine)

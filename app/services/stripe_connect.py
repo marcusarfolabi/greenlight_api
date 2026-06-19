@@ -1,5 +1,5 @@
 import logging
-from typing import NoReturn, Optional
+from typing import NoReturn, Optional,  Any, cast 
 
 import stripe  # type: ignore
 from fastapi import HTTPException, status
@@ -16,6 +16,23 @@ STRIPE_CONNECT_NOT_ENABLED_HINT = (
     "Open https://dashboard.stripe.com/connect and complete Connect setup, "
     "then use a secret key (sk_test_... or sk_live_...) from that same account."
 )
+
+# 1. ISO 3166-1 Alpha-2 Mapping Dictionary for Global Onboarding
+COUNTRY_NAME_TO_ISO = {
+    "kenya": "KE",
+    "united kingdom": "GB",
+    "uk": "GB",
+    "united states": "US",
+    "usa": "US",
+    "canada": "CA",
+    "nigeria": "NG",
+    "ghana": "GH",
+    "south africa": "ZA",
+    "australia": "AU",
+    "germany": "DE",
+    "france": "FR",
+    "ireland": "IE",
+}
 
 
 class StripeConnectService:
@@ -40,7 +57,7 @@ class StripeConnectService:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=STRIPE_CONNECT_NOT_ENABLED_HINT,
-            ) from exc
+                ) from exc
 
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -86,9 +103,10 @@ class StripeConnectService:
                 exc, "Unable to retrieve Stripe Connect account status."
             )
 
-        org.stripe_charges_enabled = bool(account.get("charges_enabled"))
-        org.stripe_payouts_enabled = bool(account.get("payouts_enabled"))
-        org.stripe_details_submitted = bool(account.get("details_submitted"))
+       # Fix: Use direct attribute access or bracket notation instead of .get()
+        org.stripe_charges_enabled = bool(getattr(account, "charges_enabled", False))
+        org.stripe_payouts_enabled = bool(getattr(account, "payouts_enabled", False))
+        org.stripe_details_submitted = bool(getattr(account, "details_submitted", False))
         org.is_verified = (
             org.stripe_charges_enabled
             and org.stripe_payouts_enabled
@@ -97,6 +115,7 @@ class StripeConnectService:
         db.commit()
         db.refresh(org)
         return StripeConnectService.connect_status(org)
+
 
     @staticmethod
     def create_connect_account(
@@ -108,13 +127,32 @@ class StripeConnectService:
             return org
 
         StripeConnectService._client()
+
+        # 2. Extract country string cleanly, standardize it, and determine ISO code
+        db_country = (org.country or "").strip().lower()
+        
+        # If it's already an explicit 2-letter ISO format, use it directly
+        if len(db_country) == 2:
+            iso_country = db_country.upper()
+        else:
+            # Look up standard translation string or default safely to platform hub (GB)
+            iso_country = COUNTRY_NAME_TO_ISO.get(db_country, "GB")
+
+        # Use Uppercase Any, and cast it to Any to fully stop Pylance from enforcing the strict structural sub-type
+        controller_params = cast(Any, {
+            "fees": {"payer": "application"},
+            "losses": {"payer": "application"},
+            "requirement_collection": "stripe_managed",
+        })
+        
         try:
+            # 3. Request account routing using dynamic country and updated modern v2 structure
             account = stripe.Account.create(
                 type="express",
-                country="US",
+                country=iso_country,
                 email=owner_email,
+                controller=controller_params,  # Passed completely un-restrictive here
                 capabilities={
-                    "card_payments": {"requested": True},
                     "transfers": {"requested": True},
                 },
                 business_type="individual",
@@ -122,7 +160,7 @@ class StripeConnectService:
             )
         except stripe.StripeError as exc:
             StripeConnectService._raise_stripe_error(
-                exc, "Unable to create Stripe Connect account."
+                exc, f"Unable to create Stripe Connect account for country {iso_country}."
             )
 
         org.stripe_connect_id = account.id
@@ -159,10 +197,6 @@ class StripeConnectService:
         org: Organization,
         owner_email: str,
     ) -> Optional[str]:
-        """
-        Ensure a Connect account exists and return an onboarding URL when setup
-        is still incomplete.
-        """
         org = StripeConnectService.create_connect_account(db, org, owner_email)
         status_payload = StripeConnectService.sync_account_status(db, org)
 
@@ -177,10 +211,6 @@ class StripeConnectService:
         org: Organization,
         rules: list[PayoutRule],
     ) -> None:
-        """
-        Reserve Stripe product/price IDs per tier for future automated transfers.
-        Skipped when Connect onboarding is incomplete or Stripe is unavailable.
-        """
         if not org.stripe_connect_id or not settings.STRIPE_SECRET_KEY:
             return
 
