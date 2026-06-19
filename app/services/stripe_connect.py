@@ -175,8 +175,8 @@ class StripeConnectService:
         owner_email: str,
     ) -> Organization:
         """
-        Creates a new Stripe Connect Express/Custom account using the Accounts V2 API.
-        Pre-populates all structural organization fields including address and merchant settings.
+        Creates a new Stripe Connect account using the Accounts V2 API.
+        Pre-populates structural organization fields including clean country ISO parsing.
         """
         if org.stripe_connect_id:
             return org
@@ -201,21 +201,19 @@ class StripeConnectService:
             "registered_name": org.name,
         }
 
-        # Build address block if info exists
-        # NOTE: Stripe V2 demands 'country' inside the address dictionary if address is passed
+        # Build address block if metadata exists
         address_payload: dict[str, str] = {
-            "country": iso_country  # 👈 Added to resolve 'Required request field missing'
+            "country": iso_country
         }
         if org.city:
             address_payload["city"] = org.city
         if org.state:
             address_payload["state"] = org.state
         
-        # Only bind the address dictionary if you actually have data beyond just the country
         if org.city or org.state:
             business_details["address"] = address_payload
 
-        # Construct complete schema payload for Accounts V2
+        # Construct payload matching supported Connect Marketplace V2 schemas
         v2_params = cast(Any, {
             "contact_email": owner_email,
             "display_name": org.name,
@@ -225,8 +223,11 @@ class StripeConnectService:
                 "business_details": business_details,
             },
             "configuration": {
-                "merchant": {
-                    
+                "recipient": {
+                    "capabilities": {
+                        # Enables platform balance transfers to this account for future payouts
+                        "stripe_balance.stripe_transfers": {"requested": True}
+                    }
                 }
             },
             "defaults": {
@@ -235,7 +236,7 @@ class StripeConnectService:
                     "losses_collector": "application",
                 },
             },
-            "dashboard": "full",
+            "dashboard": "express",  # 👈 Changed from 'full' to 'express' to fix the error
             "metadata": {
                 "organization_id": str(org.id),
                 "subdomain": org.subdomain,
