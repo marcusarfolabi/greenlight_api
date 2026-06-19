@@ -117,57 +117,142 @@ class StripeConnectService:
         return StripeConnectService.connect_status(org)
 
 
+    # @staticmethod
+    # def create_connect_account(
+    #     db: Session,
+    #     org: Organization,
+    #     owner_email: str,
+    # ) -> Organization:
+    #     if org.stripe_connect_id:
+    #         return org
+
+    #     StripeConnectService._client()
+
+    #     # 2. Extract country string cleanly, standardize it, and determine ISO code
+    #     db_country = (org.country or "").strip().lower()
+        
+    #     # If it's already an explicit 2-letter ISO format, use it directly
+    #     if len(db_country) == 2:
+    #         iso_country = db_country.upper()
+    #     else:
+    #         # Look up standard translation string or default safely to platform hub (GB)
+    #         iso_country = COUNTRY_NAME_TO_ISO.get(db_country, "GB")
+
+    #     # Use Uppercase Any, and cast it to Any to fully stop Pylance from enforcing the strict structural sub-type
+    #     controller_params = cast(Any, {
+    #         "fees": {"payer": "application"},
+    #         "losses": {"payments": "application"},  
+    #         "requirement_collection": "stripe",
+    #     })
+        
+    #     try:
+    #         # 3. Request account routing using dynamic country and updated modern v2 structure
+    #         account = stripe.Account.create(
+    #             type="express",
+    #             country=iso_country,
+    #             email=owner_email,
+    #             controller=controller_params,  # Passed completely un-restrictive here
+    #             capabilities={
+    #                 "transfers": {"requested": True},
+    #             },
+    #             business_type="individual",
+    #             metadata={"organization_id": str(org.id)},
+    #         )
+    #     except stripe.StripeError as exc:
+    #         StripeConnectService._raise_stripe_error(
+    #             exc, f"Unable to create Stripe Connect account for country {iso_country}."
+    #         )
+
+    #     org.stripe_connect_id = account.id
+    #     db.commit()
+    #     db.refresh(org)
+    #     return org
+
     @staticmethod
     def create_connect_account(
         db: Session,
         org: Organization,
         owner_email: str,
     ) -> Organization:
+        """
+        Creates a new Stripe Connect Express/Custom account using the Accounts V2 API.
+        Pre-populates all structural organization fields including address and merchant settings.
+        """
         if org.stripe_connect_id:
             return org
 
-        StripeConnectService._client()
+        if not settings.STRIPE_SECRET_KEY:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Stripe is not configured. Set STRIPE_SECRET_KEY on the server.",
+            )
+        
+        # 1. Instantiate the V2 compatible client engine
+        client = stripe.StripeClient(settings.STRIPE_SECRET_KEY)
 
         # 2. Extract country string cleanly, standardize it, and determine ISO code
         db_country = (org.country or "").strip().lower()
-        
-        # If it's already an explicit 2-letter ISO format, use it directly
         if len(db_country) == 2:
-            iso_country = db_country.upper()
+            iso_country = db_country
         else:
-            # Look up standard translation string or default safely to platform hub (GB)
-            iso_country = COUNTRY_NAME_TO_ISO.get(db_country, "GB")
+            iso_country = COUNTRY_NAME_TO_ISO.get(db_country, "gb")
 
-        # Use Uppercase Any, and cast it to Any to fully stop Pylance from enforcing the strict structural sub-type
-        controller_params = cast(Any, {
-            "fees": {"payer": "application"},
-            "losses": {"payments": "application"},  
-            "requirement_collection": "stripe_managed",
-        })
+        # 3. Build structural business verification blocks dynamically
+        business_details: dict[str, Any] = {
+            "registered_name": org.name,
+        }
+
+        # Handle complete address payload injection
+        address_payload: dict[str, str] = {}
+        if org.city:
+            address_payload["city"] = org.city
+        if org.state:
+            address_payload["state"] = org.state
         
-        try:
-            # 3. Request account routing using dynamic country and updated modern v2 structure
-            account = stripe.Account.create(
-                type="express",
-                country=iso_country,
-                email=owner_email,
-                controller=controller_params,  # Passed completely un-restrictive here
-                capabilities={
-                    "transfers": {"requested": True},
+        if address_payload:
+            business_details["address"] = address_payload
+ 
+        v2_params = cast(Any, {
+            "contact_email": owner_email,
+            "display_name": org.name,
+            "identity": {
+                "country": iso_country,
+                "entity_type": "individual",   
+                "business_details": business_details,
+            },
+            "configuration": {
+                "merchant": {
+                    "capabilities": { 
+                        "transfers": {"requested": True} 
+                    }
+                }
+            },
+            "defaults": {
+                "responsibilities": {
+                    "fees_collector": "application",
+                    "losses_collector": "application",
                 },
-                business_type="individual",
-                metadata={"organization_id": str(org.id)},
-            )
-        except stripe.StripeError as exc:
-            StripeConnectService._raise_stripe_error(
-                exc, f"Unable to create Stripe Connect account for country {iso_country}."
-            )
+            },
+            "dashboard": "full",
+            "metadata": {
+                "organization_id": str(org.id),
+                "subdomain": org.subdomain,
+                "industry": org.industry
+            },
+        })
 
+        try: 
+            account = client.v2.core.accounts.create(params=v2_params)
+        except stripe.StripeError as exc: 
+            StripeConnectService._raise_stripe_error(
+                exc, f"Unable to create Stripe Connect account via V2 for country {iso_country}."
+            )
+ 
         org.stripe_connect_id = account.id
         db.commit()
         db.refresh(org)
         return org
-
+    
     @staticmethod
     def create_onboarding_link(org: Organization) -> str:
         if not org.stripe_connect_id:
