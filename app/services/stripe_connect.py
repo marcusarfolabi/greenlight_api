@@ -168,6 +168,90 @@ class StripeConnectService:
     #     db.refresh(org)
     #     return org
 
+    # @staticmethod
+    # def create_connect_account(
+    #     db: Session,
+    #     org: Organization,
+    #     owner_email: str,
+    # ) -> Organization:
+    #     """
+    #     Creates a new Stripe Connect account using the exact Stripe Accounts V2 API schema.
+    #     Pre-populates all available organization and geographic info.
+    #     """
+    #     if org.stripe_connect_id:
+    #         return org
+
+    #     if not settings.STRIPE_SECRET_KEY:
+    #         raise HTTPException(
+    #             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    #             detail="Stripe is not configured. Set STRIPE_SECRET_KEY on the server.",
+    #         )
+        
+    #     client = stripe.StripeClient(settings.STRIPE_SECRET_KEY)
+
+    #     db_country = (org.country or "").strip().lower()
+    #     if len(db_country) == 2:
+    #         iso_country = db_country
+    #     else:
+    #         iso_country = COUNTRY_NAME_TO_ISO.get(db_country, "gb")
+
+    #     business_details: dict[str, Any] = {
+    #         "registered_name": org.name,
+    #     }
+
+    #     address_payload: dict[str, str] = {
+    #         "country": iso_country
+    #     }
+    #     if org.city:
+    #         address_payload["city"] = org.city
+    #     if org.state:
+    #         address_payload["state"] = org.state
+        
+    #     if org.city or org.state:
+    #         business_details["address"] = address_payload
+
+    #     v2_params = cast(Any, {
+    #         "contact_email": owner_email,
+    #         "display_name": org.name,
+    #         "identity": {
+    #             "country": iso_country,
+    #             "entity_type": "individual",  
+    #             "business_details": business_details,
+    #         },
+    #         "configuration": {
+    #             "merchant": {
+    #                 "capabilities": {
+    #                     "card_payments": {"requested": True}
+    #                 }
+    #             }
+    #         },
+    #         "defaults": {
+    #             "responsibilities": {
+    #                 "fees_collector": "application",
+    #                 "losses_collector": "application",
+    #             },
+    #         },
+    #         "dashboard": "express",  
+    #         "metadata": {
+    #             "organization_id": str(org.id),
+    #             "subdomain": org.subdomain,
+    #             "industry": org.industry
+    #         },
+    #     })
+
+    #     try:
+    #         account = client.v2.core.accounts.create(params=v2_params)
+    #     except stripe.StripeError as exc:
+    #         StripeConnectService._raise_stripe_error(
+    #             exc, f"Unable to create Stripe Connect account via V2 for country {iso_country}."
+    #         )
+
+    #     # 6. Save the unique structural V2 tracking token
+    #     org.stripe_connect_id = account.id
+    #     db.commit()
+    #     db.refresh(org)
+    #     return org
+    
     @staticmethod
     def create_connect_account(
         db: Session,
@@ -175,78 +259,52 @@ class StripeConnectService:
         owner_email: str,
     ) -> Organization:
         """
-        Creates a new Stripe Connect account using the exact Stripe Accounts V2 API schema.
-        Pre-populates all available organization and geographic info.
+        Creates a new Stripe Connect account using the universally supported V1 API,
+        preventing regional configuration errors for international organizations (e.g., KE).
         """
         if org.stripe_connect_id:
             return org
 
-        if not settings.STRIPE_SECRET_KEY:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Stripe is not configured. Set STRIPE_SECRET_KEY on the server.",
-            )
-        
-        client = stripe.StripeClient(settings.STRIPE_SECRET_KEY)
+        # 1. Initialize global V1 settings client
+        StripeConnectService._client()
 
+        # 2. Extract country string cleanly, standardize it, and determine ISO code (V1 expects UPPERCASE)
         db_country = (org.country or "").strip().lower()
         if len(db_country) == 2:
-            iso_country = db_country
+            iso_country = db_country.upper()
         else:
-            iso_country = COUNTRY_NAME_TO_ISO.get(db_country, "gb")
+            iso_country = COUNTRY_NAME_TO_ISO.get(db_country, "GB").upper()
 
-        business_details: dict[str, Any] = {
-            "registered_name": org.name,
-        }
-
-        address_payload: dict[str, str] = {
-            "country": iso_country
-        }
-        if org.city:
-            address_payload["city"] = org.city
-        if org.state:
-            address_payload["state"] = org.state
-        
-        if org.city or org.state:
-            business_details["address"] = address_payload
-
-        v2_params = cast(Any, {
-            "contact_email": owner_email,
-            "display_name": org.name,
-            "identity": {
-                "country": iso_country,
-                "entity_type": "individual",  
-                "business_details": business_details,
-            },
-            "configuration": {
-                "merchant": {
-                    "capabilities": {
-                        "card_payments": {"requested": True}
-                    }
-                }
-            },
-            "defaults": {
-                "responsibilities": {
-                    "fees_collector": "application",
-                    "losses_collector": "application",
-                },
-            },
-            "dashboard": "express",  
-            "metadata": {
-                "organization_id": str(org.id),
-                "subdomain": org.subdomain,
-                "industry": org.industry
-            },
+        # 3. Configure the parameters exactly according to the universally available V1 specifications
+        controller_params = cast(Any, {
+            "fees": {"payer": "application"},
+            "losses": {"payments": "application"},
+            "requirement_collection": "stripe",
         })
-
+        
         try:
-            account = client.v2.core.accounts.create(params=v2_params)
+            # 4. Use standard V1 endpoint structure (stripe.Account.create) instead of v2 client
+            account = stripe.Account.create(
+                type="express",
+                country=iso_country,
+                email=owner_email,
+                controller=controller_params,
+                capabilities={
+                    "transfers": {"requested": True}, # 👈 Fully supported worldwide in V1 for payouts
+                },
+                business_type="individual",
+                metadata={
+                    "organization_id": str(org.id),
+                    "subdomain": org.subdomain,
+                    "industry": org.industry
+                },
+            )
         except stripe.StripeError as exc:
             StripeConnectService._raise_stripe_error(
-                exc, f"Unable to create Stripe Connect account via V2 for country {iso_country}."
+                exc, f"Unable to create Stripe Connect account for country {iso_country}."
             )
 
-        # 6. Save the unique structural V2 tracking token
+        # 5. Save the generated V1 Account ID directly to your database
         org.stripe_connect_id = account.id
         db.commit()
         db.refresh(org)
