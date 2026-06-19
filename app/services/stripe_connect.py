@@ -175,7 +175,7 @@ class StripeConnectService:
         owner_email: str,
     ) -> Organization:
         """
-        Creates a new Stripe Connect account using the stable Stripe Accounts V2 API schema.
+        Creates a new Stripe Connect account using the exact Stripe Accounts V2 API schema.
         Pre-populates all available organization and geographic info.
         """
         if org.stripe_connect_id:
@@ -187,22 +187,18 @@ class StripeConnectService:
                 detail="Stripe is not configured. Set STRIPE_SECRET_KEY on the server.",
             )
         
-        # 1. Initialize the V2 client
         client = stripe.StripeClient(settings.STRIPE_SECRET_KEY)
 
-        # 2. Standardize country code to 2-letter lowercase ISO
         db_country = (org.country or "").strip().lower()
         if len(db_country) == 2:
             iso_country = db_country
         else:
             iso_country = COUNTRY_NAME_TO_ISO.get(db_country, "gb")
 
-        # 3. Formulate the legal business/individual metadata payload
         business_details: dict[str, Any] = {
             "registered_name": org.name,
         }
 
-        # Build address mapping (Stripe V2 strictly requires country if address is provided)
         address_payload: dict[str, str] = {
             "country": iso_country
         }
@@ -214,7 +210,6 @@ class StripeConnectService:
         if org.city or org.state:
             business_details["address"] = address_payload
 
-        # 4. Use the stable V2 merchant schema layout
         v2_params = cast(Any, {
             "contact_email": owner_email,
             "display_name": org.name,
@@ -226,9 +221,7 @@ class StripeConnectService:
             "configuration": {
                 "merchant": {
                     "capabilities": {
-                        # Fully stable production keys to allow them to take payments and receive payouts
-                        "payments": {"requested": True},
-                        "payouts": {"requested": True}
+                        "card_payments": {"requested": True}
                     }
                 }
             },
@@ -247,14 +240,14 @@ class StripeConnectService:
         })
 
         try:
-            # 5. Dispatch the stable payload parameters
+            # 5. Dispatch exactly matching payload parameters
             account = client.v2.core.accounts.create(params=v2_params)
         except stripe.StripeError as exc:
             StripeConnectService._raise_stripe_error(
                 exc, f"Unable to create Stripe Connect account via V2 for country {iso_country}."
             )
 
-        # 6. Save the tracking token to your database
+        # 6. Save the unique structural V2 tracking token
         org.stripe_connect_id = account.id
         db.commit()
         db.refresh(org)
