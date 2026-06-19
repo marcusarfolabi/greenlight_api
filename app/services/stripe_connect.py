@@ -141,7 +141,7 @@ class StripeConnectService:
         # Use Uppercase Any, and cast it to Any to fully stop Pylance from enforcing the strict structural sub-type
         controller_params = cast(Any, {
             "fees": {"payer": "application"},
-            "losses": {"payer": "application"},
+            "losses": {"responsible_party": "application"},  
             "requirement_collection": "stripe_managed",
         })
         
