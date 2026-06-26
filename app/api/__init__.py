@@ -10,6 +10,7 @@ from app.api.payouts import router as payouts_router
 from app.api.organization import router as organization_router
 from app.api.subscription import router as subscription_router
 from app.api.category import router as category_router
+from app.api.news import router as news_router
 
 api_router = APIRouter()
 
@@ -21,3 +22,4 @@ api_router.include_router(users_router, prefix="/users", tags=["Users"])
 api_router.include_router(organization_router, prefix="/organizations", tags=["Organizations"])
 api_router.include_router(category_router, prefix="/categories", tags=["Categories"])
 api_router.include_router(auth_router, prefix="/auth", tags=["Auth"])
+api_router.include_router(news_router, prefix="/news", tags=["News"])
