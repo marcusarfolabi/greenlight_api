@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class PlayerCreate(BaseModel):
-    arena_id: int
+    arena_id: str
     organization_id: int
     arena_access_code: int
     username: Optional[str] = None
@@ -45,7 +45,7 @@ class LobbyResponse(BaseModel):
 
 class PlayerAnswerScoreCreate(BaseModel):
     player_id: int
-    arena_id: int
+    arena_id: str
     question_id: int
     answer_selected: int
     is_correct: bool

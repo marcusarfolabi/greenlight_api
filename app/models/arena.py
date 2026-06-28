@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import uuid
 from typing import TYPE_CHECKING, List, Optional
 from datetime import datetime
 from sqlalchemy import String, ForeignKey, Text, func, JSON
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 class Arena(Base):
     __tablename__ = "arenas"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     arena_name: Mapped[str] = mapped_column(String(100), nullable=False) 
     category: Mapped[str] = mapped_column(String(100), nullable=True)
     is_public: Mapped[bool] = mapped_column(default=False)
@@ -41,7 +42,7 @@ class Question(Base):
     __tablename__ = "questions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    arena_id: Mapped[int] = mapped_column(ForeignKey("arenas.id"))
+    arena_id: Mapped[str] = mapped_column(ForeignKey("arenas.id"))
     prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
     time_limit_seconds: Mapped[int] = mapped_column(default=10)
     point_value: Mapped[int] = mapped_column(default=10)
@@ -70,7 +71,7 @@ class ArenaTokenUsageLog(Base):
     __tablename__ = "arena_token_usage_logs"
     
     id: Mapped[int] = mapped_column(primary_key=True)
-    arena_id: Mapped[Optional[int]] = mapped_column(ForeignKey("arenas.id"), nullable=True)
+    arena_id: Mapped[Optional[str]] = mapped_column(ForeignKey("arenas.id"), nullable=True)
     organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), nullable=True)
     tokens_used: Mapped[int] = mapped_column()
     capped_tokens: Mapped[Optional[int]] = mapped_column()

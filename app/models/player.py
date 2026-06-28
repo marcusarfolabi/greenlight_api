@@ -16,7 +16,7 @@ class Player(Base):
     __tablename__ = "players"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    arena_id: Mapped[int] = mapped_column(ForeignKey("arenas.id"))
+    arena_id: Mapped[str] = mapped_column(ForeignKey("arenas.id"))
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"))
     arena_access_code: Mapped[int] = mapped_column(Integer)
     username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -84,7 +84,7 @@ class PlayerAnswerScore(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
-    arena_id: Mapped[int] = mapped_column(ForeignKey("arenas.id"))
+    arena_id: Mapped[str] = mapped_column(ForeignKey("arenas.id"))
     question_id: Mapped[int] = mapped_column(ForeignKey("questions.id"))
     
     # Answer data

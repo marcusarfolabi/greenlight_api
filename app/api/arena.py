@@ -132,7 +132,7 @@ async def create_arena(
         if org.use_ai_for_arenas and total_ai_tokens > 0:
             TokenService.log_token_usage(
                 db=db,
-                arena_id=new_arena.id,
+                arena_id=str(new_arena.id),
                 tokens_used=total_ai_tokens,
                 operation=new_arena.arena_name,
                 organization_id=org.id
@@ -260,7 +260,7 @@ async def list_arenas(
 
 @router.get("/{arena_id}", response_model=ArenaDetailResponse)
 async def get_arena(
-    arena_id: int,
+    arena_id: str,
     current_user: AuthContext = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -326,7 +326,7 @@ async def get_arena(
 
 @router.put("/{arena_id}", response_model=ArenaResponse)
 async def update_arena(
-    arena_id: int,
+    arena_id: str,
     data: ArenaUpdate,
     current_user: AuthContext = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -426,7 +426,6 @@ async def update_arena(
                 raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient tokens")
 
         # --- FIX 3: SAFE PURGE OMITTED QUESTIONS WITH BOUNDS ---
-        # Now incoming_question_ids contains both updated AND newly created IDs
         delete_query = db.query(Question).filter(Question.arena_id == arena_id)
         if incoming_question_ids:
             delete_query = delete_query.filter(~Question.id.in_(incoming_question_ids))
@@ -447,7 +446,6 @@ async def update_arena(
         db.flush()
  
         # --- FIX 3: SAFE PURGE OMITTED QUESTIONS WITH BOUNDS ---
-        # Only query with .in_ if incoming_question_ids has elements
         delete_query = db.query(Question).filter(Question.arena_id == arena_id)
         if incoming_question_ids:
             delete_query = delete_query.filter(~Question.id.in_(incoming_question_ids))
@@ -466,14 +464,14 @@ async def update_arena(
             # Log token usage for this update
             TokenService.log_token_usage(
                 db=db,
-                arena_id=arena.id,
+                arena_id=str(arena.id),
                 organization_id=org.id,
                 tokens_used=new_ai_tokens,
-                operation= arena.arena_name,
+                operation=arena.arena_name,
             )
-            
-    db.commit()
-    db.refresh(arena)
+
+        db.commit()
+        db.refresh(arena)
 
     logger.info(f"Arena {arena_id} updated by host {current_user.user_id}")
 
@@ -481,7 +479,7 @@ async def update_arena(
 
 @router.delete("/{arena_id}")
 async def delete_arena(
-    arena_id: int,
+    arena_id: str,
     current_user: AuthContext = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -840,7 +838,7 @@ async def upload_questions_preview(
 
 @router.post("/{arena_id}/questions/upload")
 async def upload_questions(
-    arena_id: int,
+    arena_id: str,
     file: UploadFile | None = File(None),
     preview: bool = Form(False),
     use_ai: bool = Form(False),
@@ -977,7 +975,7 @@ async def upload_questions(
     
 @router.get("/{arena_id}/players", response_model=list[PlayerResponse])
 async def get_arena_players(
-    arena_id: int,
+    arena_id: str,
     offset: int = 0,
     limit: int = 100,
     search: Optional[str] = None,
@@ -1028,7 +1026,7 @@ async def get_arena_players(
     
 @router.post("/{arena_id}/participants/message")
 async def send_participants_message(
-    arena_id: int,
+    arena_id: str,
     background_tasks: BackgroundTasks,
     channel: str = Form(...),
     file: Optional[UploadFile] = File(None),  # Expecting uploaded file
@@ -1142,7 +1140,7 @@ async def get_lobby_info(
 
 @router.post("/{arena_id}/start-countdown")
 async def start_arena_countdown(
-    arena_id: int,
+    arena_id: str,
     countdown_seconds: int = Body(default=30, embed=True),
     current_user: AuthContext = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -1211,7 +1209,7 @@ async def start_arena_countdown(
 
 @router.get("/{arena_id}/scoreboard", response_model=list[PlayerScoreboardResponse])
 async def get_arena_scoreboard_endpoint(
-    arena_id: int,
+    arena_id: str,
     db: Session = Depends(get_db),
 ):
     """Get live scoreboard for arena with player rankings"""
@@ -1219,7 +1217,7 @@ async def get_arena_scoreboard_endpoint(
 
 
 def get_arena_scoreboard(
-    arena_id: int,
+    arena_id: str,
     db: Session,
 ):
     """Helper function to calculate scoreboard for an arena with all player scores ranked"""
@@ -1272,7 +1270,7 @@ def get_arena_scoreboard(
     return [PlayerScoreboardResponse.model_validate(entry) for entry in scoreboard_data]
 
 
-async def close_arena_and_build_payout_ledger(arena_id: int, db: Session):
+async def close_arena_and_build_payout_ledger(arena_id: str, db: Session):
     # 1. Fetch all active participants who completed or played in the arena
     players = db.query(Player).filter(
         Player.arena_id == arena_id,
@@ -1387,7 +1385,7 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
     await websocket.accept()
     await ws_manager.connect(str(access_code), websocket)
 
-    player_info: dict = {"player_id": 0, "player_name": "", "arena_id": 0}
+    player_info: dict = {"player_id": 0, "player_name": "", "arena_id": ""}
 
     try:
         from app.db.session import get_db as _get_db

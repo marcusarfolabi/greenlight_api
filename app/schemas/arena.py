@@ -72,7 +72,7 @@ class AIQuestionGenerationRequest(BaseModel):
     num_questions: int = Field(ge=1, le=20)
     difficulty: str = Field(default="medium")  # easy, medium, hard
     language: str = Field(default="en")
-    arena_id: Optional[int] = None
+    arena_id: Optional[str] = None
 
 
 class ArenaUpdate(BaseModel):
@@ -93,7 +93,7 @@ class ArenaTokenInfo(BaseModel):
 
 
 class ArenaResponse(BaseModel):
-    id: int
+    id: str
     arena_name: str
     category: str
     is_public: bool
@@ -117,7 +117,7 @@ class ArenaDetailResponse(ArenaResponse):
         from_attributes = True
 class ArenaTokenUsageLogResponse(BaseModel):
     id: int
-    arena_id: Optional[int] = None
+    arena_id: Optional[str] = None
     tokens_used: int
     operation: str
     details: Optional[str] = None

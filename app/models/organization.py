@@ -89,7 +89,7 @@ class ArenaPayoutReport(Base):
     __tablename__ = "arena_payout_reports"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    arena_id: Mapped[int] = mapped_column(ForeignKey("arenas.id", ondelete="CASCADE"))
+    arena_id: Mapped[str] = mapped_column(ForeignKey("arenas.id", ondelete="CASCADE"))
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"))
     
     # Financial Audit Fields
@@ -120,7 +120,7 @@ class PayoutRule(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"))
-    arena_id: Mapped[Optional[int]] = mapped_column(ForeignKey("arenas.id", ondelete="CASCADE"), nullable=True)
+    arena_id: Mapped[Optional[str]] = mapped_column(ForeignKey("arenas.id", ondelete="CASCADE"), nullable=True)
     
     position: Mapped[str] = mapped_column(String(50))  # "1st", "2nd", "3rd", "top_5", etc.
     amount: Mapped[float] = mapped_column(Float)  # Amount in dollars

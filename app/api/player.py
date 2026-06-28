@@ -63,7 +63,7 @@ async def list_public_arenas(
 
 @router.get("/{arena_id}", response_model=ArenaDetailResponse)
 async def get_arena(
-    arena_id: int,
+    arena_id: str,
     current_user: Optional[AuthContext] = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):

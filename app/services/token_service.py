@@ -2,7 +2,7 @@
 Token usage tracking for AI operations
 """
 import logging
-from typing import Optional
+from typing import Optional, Union
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -120,7 +120,7 @@ class TokenService:
     @staticmethod
     def log_token_usage(
         db: Session,
-        arena_id: Optional[int],
+        arena_id: Optional[Union[int, str]],
         tokens_used: int,
         
         operation: str = "question_generation",
