@@ -1,7 +1,7 @@
 from typing import List, Optional, TYPE_CHECKING
 from datetime import datetime
 import enum
-from sqlalchemy import String, Enum, Text, func, ForeignKey
+from sqlalchemy import String, Enum, Text, func, ForeignKey, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.wallet import Wallet
@@ -33,8 +33,8 @@ class User(Base):
     apple_id: Mapped[Optional[str]] = mapped_column(String(255)) 
     
     role: Mapped[str] = mapped_column(String(50), default="user")    
-    is_active: Mapped[bool] = mapped_column(default=False)
-    email_verified_at: Mapped[datetime] = mapped_column(insert_default=func.now())
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    email_verified_at: Mapped[Optional[datetime]] = mapped_column(nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
     
     organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), nullable=True)

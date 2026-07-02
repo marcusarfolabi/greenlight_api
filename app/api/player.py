@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime 
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -12,13 +14,13 @@ from app.schemas.arena import (
     QuestionResponse,
 )
 from app.models.arena import Arena, Question
-from app.models.player import Player
+from app.models.player import Player, PlayerAnswerScore
 from app.schemas.user import AuthContext
+from app.schemas.player import PlayerScoreboardResponse
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-from typing import Optional
 
 @router.get("", response_model=list[ArenaResponse])
 async def list_public_arenas(
@@ -126,3 +128,84 @@ async def get_arena(
         ai_tokens_used=arena.ai_tokens_used,
         token_info=ArenaTokenInfo(**token_info_dict),
     )
+ 
+@router.get("/scoreboard", response_model=list[PlayerScoreboardResponse])
+async def get_my_arena_scoreboard_endpoint(
+    db: Session = Depends(get_db),
+    current_user: AuthContext = Depends(get_current_user),
+):
+    """Get the live scoreboard for the authenticated user's current arena"""
+    return get_player_arena_scoreboard(current_user.user_id, db)
+
+
+def get_player_arena_scoreboard(
+    user_id: int,
+    db: Session,
+):
+    """
+    Helper function to find a player's arena based on their authenticated user ID,
+    then calculate the ranked scoreboard for that arena.
+    """
+
+    # 1. Look up the player to find what arena they are assigned to
+    # Adjust filtering if your Player model links to users via another attribute name (e.g., user_id)
+    player_record = db.query(Player).filter(Player.id == user_id).first() 
+    if not player_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Player profile not found for authenticated user."
+        )
+    
+    arena_id = player_record.arena_id
+    if not arena_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Player is not currently registered to any active arena."
+        )
+
+    # 2. Verify the Arena exists
+    arena = db.query(Arena).filter(Arena.id == arena_id).first()
+    if not arena:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Arena not found"
+        )
+    
+    # 3. Get all players for this arena with their scores aggregated
+    players = db.query(Player).filter(Player.arena_id == arena_id).all()
+    
+    scoreboard_data = []
+    for p in players:
+        # Get all answers for this player in this arena
+        answers = db.query(PlayerAnswerScore).filter(
+            PlayerAnswerScore.player_id == p.id,
+            PlayerAnswerScore.arena_id == arena_id
+        ).all()
+        
+        total_score = sum(a.points_earned for a in answers)
+        correct_count = sum(1 for a in answers if a.is_correct)
+        total_answers = len(answers)
+        accuracy = (correct_count / total_answers * 100) if total_answers > 0 else 0
+        last_answered = max([a.answered_at for a in answers], default=None) if answers else None
+        
+        scoreboard_data.append({
+            "player_id": p.id,
+            "username": p.username,
+            "total_score": total_score,
+            "answers_correct": correct_count,
+            "answers_total": total_answers,
+            "accuracy_percentage": round(accuracy, 2),
+            "last_answered_at": last_answered,
+            "rank": None,  # Will be set after sorting
+        })
+    
+    # Sort by total score descending, then by accuracy descending, then by answer time ascending
+    scoreboard_data.sort(
+        key=lambda x: (-x["total_score"], -x["accuracy_percentage"], x["last_answered_at"] or datetime.max),
+    )
+    
+    # Add ranks after sorting
+    for idx, entry in enumerate(scoreboard_data, 1):
+        entry["rank"] = idx
+    
+    # Convert to response models
+    return [PlayerScoreboardResponse.model_validate(entry) for entry in scoreboard_data]

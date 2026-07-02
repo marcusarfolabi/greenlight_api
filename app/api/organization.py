@@ -12,6 +12,12 @@ from app.schemas.organization import (
     WalletSummaryResponse,
 )
 from app.services.stripe_connect import StripeConnectService
+import stripe  # type: ignore
+from app.core.config import settings
+from fastapi import BackgroundTasks
+from app.schemas.organization import CreateTopUpRequest, ConfirmTopUpRequest
+from app.models.wallet import Transaction, TransactionType
+from app.models.subscription import Subscription
 from app.models.organization import PayoutRule
 from app.services.user_service import UserService           
 from app.services.organization import OrganizationService
@@ -109,9 +115,6 @@ async def get_organization_settings(
             detail="Organization not found"
         )
 
-    if org.stripe_connect_id:
-        StripeConnectService.sync_account_status(db, org)
-
     return OrganizationService.build_settings_response(org)
 
 
@@ -169,22 +172,7 @@ async def update_organization_settings(
                 db.add(new_rule)
 
         db.flush()
-
-        if (
-            org.enable_payouts
-            and org.payout_method == "stripe"
-            and settings_data.payouts.payout_rules
-        ):
-            user = UserService.get_user(db, user_id=auth.user_id)
-            if user:
-                stripe_onboarding_url = StripeConnectService.ensure_onboarding(
-                    db, org, user.email
-                )
-                db.refresh(org)
-                StripeConnectService.sync_payout_rules_to_stripe(
-                    db, org, list(org.payout_rules)
-                )
-
+        
     db.commit()
     db.refresh(org)
 
@@ -193,6 +181,133 @@ async def update_organization_settings(
         **settings_response.model_dump(),
         stripe_onboarding_url=stripe_onboarding_url,
     )
+
+
+@router.post("/wallet/top-up")
+async def create_wallet_topup(
+    request: CreateTopUpRequest,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    """Create a Stripe PaymentIntent to top-up the organization's wallet."""
+    if not auth.org_id or auth.org_id == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User must belong to an organization to top-up wallet",
+        )
+
+    organization = OrganizationService.get_by_owner(db, auth.user_id)
+    if not organization:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+
+    if not settings.STRIPE_SECRET_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe is not configured",
+        )
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    try:
+        # Try to reuse an existing subscription customer if present
+        existing_sub = db.query(Subscription).filter(Subscription.organization_id == auth.org_id, Subscription.stripe_customer_id != None).first()
+        if existing_sub and existing_sub.stripe_customer_id:
+            stripe_customer_id = existing_sub.stripe_customer_id
+        else:
+            customer = stripe.Customer.create(
+                name=organization.name,
+                metadata={"organization_id": str(auth.org_id)},
+            )
+            stripe_customer_id = customer.id
+
+        amount = int(request.amount * 100)
+
+        payment_intent = stripe.PaymentIntent.create(
+            amount=amount,
+            currency=organization.wallet.currency if organization.wallet else "usd",
+            customer=stripe_customer_id,
+            automatic_payment_methods={"enabled": True},
+            metadata={
+                "organization_id": str(auth.org_id),
+                "purpose": "wallet_topup",
+            },
+        )
+
+        return {"client_secret": payment_intent.client_secret, "payment_intent_id": payment_intent.id}
+
+    except Exception as e:
+        logger.error(f"Stripe error creating top-up intent: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to create top-up intent: {str(e)}",
+        )
+
+
+@router.post("/wallet/confirm-topup")
+async def confirm_wallet_topup(
+    request: ConfirmTopUpRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    """Confirm a Stripe PaymentIntent and credit the organization's wallet."""
+    organization = OrganizationService.get_by_owner(db, auth.user_id)
+    if not organization:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+
+    if not settings.STRIPE_SECRET_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe is not configured",
+        )
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    try:
+        payment_intent = stripe.PaymentIntent.retrieve(request.payment_intent_id)
+
+        if payment_intent.status != "succeeded":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Payment not completed. Status: {payment_intent.status}",
+            )
+
+        wallet = OrganizationService.get_or_create_wallet(db, organization.id)
+
+        amount = int(payment_intent.amount)
+
+        tx = Transaction(
+            wallet_id=wallet.id,
+            amount=amount,
+            type=TransactionType.DEPOSIT,
+            stripe_reference=payment_intent.id,
+            status="completed",
+            description=f"Top-up via Stripe",
+        )
+        db.add(tx)
+
+        wallet.balance = (wallet.balance or 0) + amount
+
+        db.commit()
+        db.refresh(wallet)
+
+        return {"success": True, "message": "Wallet topped up successfully", "balance": wallet.balance}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error confirming top-up: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to confirm top-up",
+        )
 
 
 @router.get("/settings/payouts", response_model=list[PayoutRuleResponse])

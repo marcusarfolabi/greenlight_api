@@ -1,17 +1,19 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timezone 
 import enum
+import logging
 from typing import Optional
 
-from sqlalchemy import and_
+
+from app.utils.currency import get_currency_by_country_code
 from sqlalchemy.orm import Session
-from jose import jwt, JWTError
 
 from app.core.security import hash_password
 from app.models.user import User
 from app.models.wallet import Wallet
 from app.schemas.user import UserCreate, UserUpdate
-from app.core.config import settings
 from app.models.subscription import Subscription
+
+logger = logging.getLogger(__name__)
 
 class UserService:
     """Service layer for user operations."""
@@ -42,9 +44,27 @@ class UserService:
 
     @staticmethod
     def create_user(db: Session, user_data: UserCreate) -> User: 
+        logger.debug("UserService.create_user initiated with user_data: %r", user_data.model_dump(exclude={"password"}))
+        
         google_id = getattr(user_data, "google_id", None)
         linkedin_id = getattr(user_data, "linkedin_id", None)
         apple_id = getattr(user_data, "apple_id", None)
+
+        email_verified_at = None
+        if google_id or linkedin_id or apple_id:
+            email_verified_at = datetime.now(timezone.utc)
+
+        # Read country_iso from incoming payload
+        incoming_country = getattr(user_data, "country_iso", None)
+        logger.debug("Extracted incoming country_iso: %r", incoming_country)
+        
+        if incoming_country:
+            detected_currency = get_currency_by_country_code(incoming_country)
+        else:
+            logger.warning("Payload missing country_iso field. Defaulting currency selection to 'gbp'.")
+            detected_currency = "gbp"
+
+        logger.info("Final currency evaluation for user registration setup: %r", detected_currency)
 
         db_user = User(
             email=user_data.email,
@@ -53,18 +73,31 @@ class UserService:
             first_name=getattr(user_data, "first_name", None),
             last_name=getattr(user_data, "last_name", None),
             role=user_data.role.value if isinstance(user_data.role, enum.Enum) else user_data.role,
-            is_active=user_data.is_active if getattr(user_data, "is_active", None) is not None else False,
+            is_active=bool(getattr(user_data, "is_active", False)),
             google_id=google_id,
             linkedin_id=linkedin_id,
-            apple_id=apple_id
+            apple_id=apple_id,
+            email_verified_at=email_verified_at,
+            location=getattr(user_data, "location", None) or incoming_country
         )
         db.add(db_user)
-        db.flush()
- 
+        db.flush() 
+        
+        logger.debug("User flushed to database. Generated User ID: %r", db_user.id)
+        
+        # Explicitly instantiate the wallet and print its state
+        logger.info("Instantiating Wallet with user_id=%s, currency=%s", db_user.id, detected_currency)
+        wallet = Wallet(user_id=db_user.id, currency=detected_currency)
+        
+        db.add(wallet)
         db.commit()
+        
+        # Final validation log after commit to see what actually saved
         db.refresh(db_user)
+        logger.info("Successfully registered user! DB Saved State -> wallet.currency: %r", 
+                    db_user.wallet.currency if db_user.wallet else "No Wallet Found")
+                    
         return db_user
-
     @staticmethod
     def update_user_social_id(db: Session, user_id: int, provider_field: str, provider_id: str) -> Optional[User]:
         """

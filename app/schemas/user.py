@@ -45,7 +45,9 @@ class UserCreate(UserBase):
     last_name: Optional[str] = None
     phone_number: Optional[str] = None  
     is_active: Optional[bool] = False
-    google_id: Optional[str] = None
+    google_id: Optional[str] = None 
+    location: Optional[str] = None
+    country_iso: Optional[str] = None
 class UserOrgCreate(BaseModel):
     user: UserCreate
     organization: OrganizationCreate

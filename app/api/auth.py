@@ -1,8 +1,9 @@
 import logging
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Form
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 
@@ -33,6 +34,19 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username/email or password",
+        )
+    
+    # debug: log is_active value to diagnose truthiness issues
+    logger.debug("Login attempt for %s; is_active=%r", user.email, getattr(user, "is_active", None))
+
+    # if user is not active AND email not verified, send an OTP and instruct FE to show OTP screen
+    if (not bool(getattr(user, "is_active", False))) and (getattr(user, "email_verified_at", None) is None):
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={
+                "detail": "User account email is unverified. Click on Forgot Password to receive a verification code.",
+                "otp_sent": True,
+            },
         )
 
     hasOrg = UserService.user_has_org(db, user.id)
@@ -73,7 +87,6 @@ async def login(
         response_data["user"]["subdomain"] = subdomain
     
     return response_data
-
 
 @router.post("/refresh-token")
 async def refresh_user_token(
@@ -323,6 +336,7 @@ async def verify_otp(payload: VerifyOTPRequest, db: Session = Depends(get_db)):
     
     if not user.is_active:
         user.is_active = True
+        user.email_verified_at = datetime.now(timezone.utc)
         db.add(user)
         db.commit()
         db.refresh(user)

@@ -78,6 +78,10 @@ class SubscriptionService:
         
         organization.capped_tokens = (organization.capped_tokens or 0) + plan.ai_tokens
         organization.is_verified = True
+        db.add(organization)
+        db.commit()
+        db.refresh(organization)
+        
         logger.info(f"Added {plan.ai_tokens} tokens to organization {organization_id} (total: {organization.capped_tokens})")
         
         # Create the new subscription
@@ -95,19 +99,8 @@ class SubscriptionService:
             Wallet.organization_id == organization_id
         ).first()
 
-        if not wallet:
-            wallet = Wallet(
-                organization_id=organization_id,
-                user_id=None,
-                balance=0,
-                pending_balance=0,
-                currency=plan.currency,
-            )
-            db.add(wallet)
-            db.flush()
-
         transaction = Transaction(
-            wallet_id=wallet.id,
+            wallet_id=wallet.id if wallet else None,
             amount=-int(plan.price * 100),
             type=TransactionType.SUBSCRIPTION,
             stripe_reference=stripe_subscription_id,

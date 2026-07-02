@@ -90,6 +90,7 @@ class ArenaTokenInfo(BaseModel):
     total_players: int = 0
     completed_players: int = 0
     completion_rate: float = 0.0
+    token_info: Optional[str] = None
 
 
 class ArenaResponse(BaseModel):

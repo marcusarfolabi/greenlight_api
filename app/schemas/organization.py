@@ -169,3 +169,13 @@ class OrgSettingsResponse(BaseModel):
 class OrgSettingsSaveResponse(OrgSettingsResponse):
     """Returned after saving settings; may include a Stripe onboarding redirect URL."""
     stripe_onboarding_url: Optional[str] = None
+
+
+# ===== Wallet Top-up Schemas
+class CreateTopUpRequest(BaseModel):
+    amount: float = Field(..., description="Top-up amount in dollars")
+    currency: Optional[str] = Field(None, description="ISO currency code (e.g. 'usd', 'gbp')")
+
+
+class ConfirmTopUpRequest(BaseModel):
+    payment_intent_id: str

@@ -2,7 +2,6 @@ import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Body, File, Form, UploadFile, BackgroundTasks, WebSocket, WebSocketDisconnect
 import asyncio
-import json
 from datetime import datetime
 from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
@@ -34,11 +33,10 @@ from app.schemas.user import AuthContext
 from app.services.token_service import TokenService
 from app.services.ai_question_service import AIQuestionGenerationService
 from app.services.upload_service import parse_questions_file
-from app.schemas.player import PlayerResponse, LobbyResponse, LobbyPlayer, PlayerScoreboardResponse
+from app.schemas.player import PlayerResponse, LobbyResponse, PlayerScoreboardResponse
 from app.services.mail_service import MailService
 from app.services.twilio_service import TwilioService
 from app.services.ws_manager import ws_manager
-from app.core.security import decode_token
 
 logger = logging.getLogger(__name__)
 
@@ -321,7 +319,7 @@ async def get_arena(
         created_at=arena.created_at,
         updated_at=arena.updated_at,
         ai_tokens_used=arena.ai_tokens_used,
-        token_info=ArenaTokenInfo(**token_info_dict), # Cast dict to the expected Pydantic model
+        token_info=ArenaTokenInfo(**token_info_dict), 
     )
 
 @router.put("/{arena_id}", response_model=ArenaResponse)

@@ -27,9 +27,7 @@ class OrganizationService:
 
     @staticmethod
     def build_settings_response(org: Organization) -> OrgSettingsResponse:
-        return OrgSettingsResponse.model_validate(org).model_copy(
-            update={"stripe_connect": StripeConnectService.connect_status(org)},
-        )
+        return OrgSettingsResponse.model_validate(org).model_copy(update={"owner_id": org.owner_id, "is_verified": org.is_verified})
 
     
     @staticmethod
@@ -58,7 +56,16 @@ class OrganizationService:
             db.add(db_org)
             db.flush()
 
-            db.add(Wallet(organization_id=db_org.id, user_id=user_id, balance=0, currency="gbp"))
+            wallet = user.wallet
+            if wallet is None:
+                wallet = db.query(Wallet).filter(Wallet.user_id == user.id).first()
+                
+                if not wallet:
+                    wallet = Wallet(user_id=user.id, currency=getattr(user, "currency_iso", "gbp"))
+                    db.add(wallet)
+
+            wallet.organization_id = db_org.id 
+            db.commit()
             
             user.organization_id = db_org.id
             user.first_name = org_data.first_name
@@ -93,7 +100,7 @@ class OrganizationService:
         if wallet:
             return wallet
 
-        wallet = Wallet(organization_id=organization_id, user_id=None, balance=0, currency="gbp")
+        wallet = Wallet(organization_id=organization_id)
         db.add(wallet)
         db.commit()
         db.refresh(wallet)
@@ -125,7 +132,6 @@ class OrganizationService:
             "total_spent": total_spent,
             "pending_withheld": pending_withheld,
             "currency": wallet.currency,
-            "stripe_connect_id": org.stripe_connect_id,
             "transactions": [
                 {
                     "id": transaction.id,

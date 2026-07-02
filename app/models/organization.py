@@ -21,13 +21,9 @@ class Organization(Base):
     industry: Mapped[str] = mapped_column(String(50))
     capped_tokens: Mapped[Optional[int]] = mapped_column() 
 
-    stripe_connect_id: Mapped[Optional[str]] = mapped_column(String(100))
     city: Mapped[Optional[str]] = mapped_column(String(100))
     state: Mapped[Optional[str]] = mapped_column(String(100))
-    country: Mapped[Optional[str]] = mapped_column(String(100))
-    stripe_charges_enabled: Mapped[bool] = mapped_column(default=False)
-    stripe_payouts_enabled: Mapped[bool] = mapped_column(default=False)
-    stripe_details_submitted: Mapped[bool] = mapped_column(default=False)
+    country: Mapped[Optional[str]] = mapped_column(String(100)) 
     is_verified: Mapped[bool] = mapped_column(default=False)
     
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
