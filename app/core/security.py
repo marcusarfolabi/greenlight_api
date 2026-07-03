@@ -80,3 +80,17 @@ async def get_current_user(
         role=payload.get("role", "user"),
         username=payload.get("username", "")
     )
+
+
+async def require_superadmin(
+    auth_context: AuthContext = Depends(get_current_user),
+):
+    """Dependency to ensure the current token belongs to a superadmin user."""
+    if auth_context.role is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing role in token")
+
+    # Normalize role comparison to lowercase strings
+    if str(auth_context.role).lower() != "superadmin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin role required")
+
+    return auth_context

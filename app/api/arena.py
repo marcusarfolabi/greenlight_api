@@ -38,9 +38,8 @@ from app.services.mail_service import MailService
 from app.services.twilio_service import TwilioService
 from app.services.ws_manager import ws_manager
 
-logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter() 
 logger = logging.getLogger(__name__)
 
 # Upload limits
