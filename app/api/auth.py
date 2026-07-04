@@ -17,6 +17,7 @@ from app.schemas.user import AuthContext, ForgotPasswordRequest, GoogleTokenPayl
 from app.services.user_service import UserService           
 from app.services.mail_service import mail_service  
 from app.core.cache import otp_cache  
+from app.core.recaptcha import verify_recaptcha
 
 
 router = APIRouter()
@@ -26,8 +27,12 @@ logger = logging.getLogger(__name__)
 async def login(
     username: str = Form(...),   
     password: str = Form(...),   
+    recaptcha_token: str = Form(None),
     db: Session = Depends(get_db)
 ):
+    # verify reCAPTCHA token
+    if not await verify_recaptcha(recaptcha_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="reCAPTCHA verification failed.")
     user = UserService.get_user_by_login(db, username)
     
     if not user or not verify_password(password, user.hashed_password):
@@ -241,6 +246,9 @@ async def auth_google(
         
 @router.post("/register", response_model=UserResponse)
 async def register(user_data: UserCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    # Verify reCAPTCHA token provided by the client
+    if not await verify_recaptcha(user_data.recaptcha_token):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="reCAPTCHA verification failed.")
     if UserService.get_user_by_email(db, user_data.email):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

@@ -8,6 +8,7 @@ pydantic-settings
 pyjwt
 fastapi-mail
 requests
+httpx
 stripe
 # google-genai
 # google-auth

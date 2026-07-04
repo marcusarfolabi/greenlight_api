@@ -48,6 +48,7 @@ class UserCreate(UserBase):
     google_id: Optional[str] = None 
     location: Optional[str] = None
     country_iso: Optional[str] = None
+    recaptcha_token: Optional[str] = None
 class UserOrgCreate(BaseModel):
     user: UserCreate
     organization: OrganizationCreate

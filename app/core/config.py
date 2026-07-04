@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     STRIPE_CONNECT_RETURN_URL: str = ""
     STRIPE_CONNECT_REFRESH_URL: str = ""
     
+    RECAPTCHA_SECRET_KEY: str = ""
+    
     GEMINI_API_KEY: str = ""
     
     # Twilio configuration

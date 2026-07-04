@@ -59,6 +59,7 @@ class User(Base):
         foreign_keys=[Wallet.user_id],
         uselist=False,
     )
+    push_subscriptions: Mapped["PushSubscription"] = relationship("PushSubscription", back_populates="user", cascade="all, delete-orphan")
 
 class PayoutProfile(Base):
     __tablename__ = "payout_profiles"
@@ -72,3 +73,16 @@ class PayoutProfile(Base):
     iban: Mapped[Optional[str]] = mapped_column(String(50))
     
     user: Mapped["User"] = relationship(back_populates="payout_profile")
+    
+    
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    
+    endpoint: Mapped[str] = mapped_column(String(255), unique=True)
+    device_type: Mapped[str] = mapped_column(String(255))
+    keys: Mapped[str] = mapped_column(String(255)) 
+    created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
+    
+    user: Mapped["User"] = relationship(back_populates="push_subscriptions")
