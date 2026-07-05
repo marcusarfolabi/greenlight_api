@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY ./app ./app
 
-COPY .env.docker . 
+# COPY .env.docker . 
 
 RUN mkdir -p /app/cache
 

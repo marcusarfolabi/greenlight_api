@@ -4,11 +4,12 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.openapi.docs import get_swagger_ui_html 
+from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 
-from sqlalchemy import text 
+from sqlalchemy import text
 load_dotenv(dotenv_path=".env.docker")
+
 
 from app.api import api_router
 from app.db.session import engine
@@ -47,7 +48,7 @@ async def startup_event():
         # with engine.begin() as connection:
         #     # Grab all table names registered in your SQLAlchemy Base models
         #     table_names = ", ".join([f'"{table.name}"' for table in Base.metadata.sorted_tables])
-            
+
         #     if table_names:
         #         logger.info(f"Force dropping tables: {table_names}")
         #         # CASCADE forces Postgres to drop tables regardless of circular foreign keys
@@ -75,7 +76,7 @@ async def startup_event():
 def get_admin_user(credentials: HTTPBasicCredentials = Depends(security)):
     correct_username = os.getenv("API_ADMIN_USERNAME")
     correct_password = os.getenv("API_ADMIN_PASSWORD")
-    
+
     if not correct_password:
         logger.error("❌ CRITICAL: API_ADMIN_PASSWORD environment variable is NOT SET")
         raise HTTPException(
@@ -88,7 +89,7 @@ def get_admin_user(credentials: HTTPBasicCredentials = Depends(security)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
         )
-    
+
     if credentials.username != correct_username or credentials.password != correct_password:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -126,11 +127,11 @@ async def get_open_api_endpoint(
 app.add_middleware(
     CORSMiddleware,
     # allow_origins=settings.CORS_ORIGINS,
-    allow_origins=["http://localhost:3000", "https://greenlight.webshoptechnology.us"],  
+    allow_origins=["http://localhost:3000", "https://greenlight.webshoptechnology.us"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-) 
+)
 
 app.include_router(api_router, prefix="/api/v1")
 
@@ -139,13 +140,13 @@ async def root():
     try:
         with engine.connect() as conn:
             return {
-                "status": "Greenlight is operational", 
+                "status": "Greenlight is operational",
                 "environment": os.getenv("ENVIRONMENT"),
                 "db_status": "connected"
             }
     except Exception as e:
         return {
-            "status": "Greenlight is operational", 
+            "status": "Greenlight is operational",
             "environment": os.getenv("ENVIRONMENT"),
             "db_status": f"connection failed: {str(e)}"
         }

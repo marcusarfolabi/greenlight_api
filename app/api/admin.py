@@ -15,6 +15,7 @@ from app.models.wallet import Wallet, Transaction
 from app.models.subscription import Subscription
 from app.models.subscription import SubscriptionPlan as Plan
 from app.models.organization import Organization
+from enum import Enum
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -133,7 +134,7 @@ async def list_all_arenas(
         .limit(limit)
         .all()
     )
-    
+
     results = []
     for a in arenas:
         total_players = db.query(Player).filter(Player.arena_id == a.id).count()
@@ -156,11 +157,6 @@ async def list_all_arenas(
 
     return results
 
-from enum import Enum
-from typing import Optional
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import desc
-from sqlalchemy.orm import Session
 
 # 1. Define the permitted roles for validation and automated Swagger dropdowns
 class UserRoleFilter(str, Enum):
@@ -177,15 +173,15 @@ async def list_users_by_role(
     db: Session = Depends(get_db),
 ):
     """
-    List users dynamically filtered by role. 
+    List users dynamically filtered by role.
     If no role is provided, it returns all users.
     """
     query = db.query(User)
-    
+
     # 2. Dynamically apply filters based on query selection
     if role:
         query = query.filter(User.role == role.value)
-        
+
         # Keep your safety constraint: hosts must belong to an organization
         if role == UserRoleFilter.HOST:
             query = query.filter(User.organization_id.isnot(None))
@@ -197,7 +193,7 @@ async def list_users_by_role(
         .limit(limit)
         .all()
     )
-    
+
     results = []
     for u in users:
         results.append({
@@ -210,7 +206,7 @@ async def list_users_by_role(
             "location": u.location,
             "avatar": u.avatar,
             "organization_id": u.organization_id,
-            "role": u.role,  
+            "role": u.role,
             "is_active": u.is_active,
             "created_at": u.created_at,
             "updated_at": u.updated_at,
@@ -231,7 +227,7 @@ async def list_organizations_with_subscription(
     List organizations who have an active subscription.
     """
     # Return organization-level subscription info (joins Subscription and Plan)
-   
+
 
     query = (
         db.query(Organization, Subscription, Plan)

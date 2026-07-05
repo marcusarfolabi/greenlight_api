@@ -9,7 +9,6 @@ else:
     db_host = settings.DB_HOST or "localhost"
     db_port = settings.DB_PORT or "5432"
     DATABASE_URL = f"postgresql://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@{db_host}:{db_port}/{settings.POSTGRES_DB}"
-
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
