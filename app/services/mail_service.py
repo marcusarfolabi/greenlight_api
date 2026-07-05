@@ -70,4 +70,22 @@ class MailService:
         fm = FastMail(mail_conf)
         await fm.send_message(message, template_name="subscription_message.html")
 
+    @staticmethod
+    async def send_token_purchase_confirmation(email: str, name: str, org_name: str, tokens_purchased: int, cost: float, currency: str, total_tokens: int):
+        message = MessageSchema(
+            subject=f"Token Purchase Confirmation - {tokens_purchased:,} tokens",
+            recipients=[email],
+            template_body={
+                "name": name,
+                "org_name": org_name,
+                "tokens_purchased": f"{tokens_purchased:,}",
+                "cost": f"{cost:.2f}",
+                "currency": currency,
+                "total_tokens": f"{total_tokens:,}",
+            },
+            subtype=MessageType.html,
+        )
+        fm = FastMail(mail_conf)
+        await fm.send_message(message, template_name="token_purchase_confirmation.html")
+
 mail_service = MailService()

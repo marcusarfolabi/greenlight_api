@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: List[str] = ["*"]
     RESEND_API_KEY: str = ""
-    RESEND_FROM_EMAIL: str = "hello@falconmail.online"
+    RESEND_FROM_EMAIL: str = "hello@send.greenlightquiz.com"
 
     APP_NAME: str = "Green Light Quiz"
 

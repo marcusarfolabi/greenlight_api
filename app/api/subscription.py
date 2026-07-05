@@ -10,6 +10,8 @@ from app.core.security import create_access_token, get_current_user
 from app.models.subscription import SubscriptionPlan, Subscription
 from app.models.organization import Organization
 from app.schemas.subscription import (
+    BuyTokensRequest,
+    BuyTokensResponse,
     ConfirmPaymentRequest,
     CreatePaymentIntentRequest,
     SubscriptionAuthWrapperResponse,
@@ -68,7 +70,7 @@ def generate_auth_payload(db: Session, user_id: int) -> dict:
         user_data["subdomain"] = UserService.user_sub_domain(db, user.id)
 
     return {
-        "access_token": access_token, 
+        "access_token": access_token,
         "token_type": "bearer",
         "user": user_data
     }
@@ -78,7 +80,7 @@ def generate_auth_payload(db: Session, user_id: int) -> dict:
 async def get_all_plans(db: Session = Depends(get_db)):
     """Get all available subscription plans"""
     plans = db.query(SubscriptionPlan).filter(
-        SubscriptionPlan.is_active == True
+        SubscriptionPlan.is_active
     ).order_by(SubscriptionPlan.display_order).all()
     return plans
 
@@ -89,18 +91,18 @@ async def get_plan(plan_id: int, db: Session = Depends(get_db)):
     plan = db.query(SubscriptionPlan).filter(
         SubscriptionPlan.id == plan_id
     ).first()
-    
+
     if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Subscription plan not found"
         )
-    
+
     return plan
 
 
 @router.get("/organization", response_model=SubscriptionResponse)
-async def get_organization_subscription( 
+async def get_organization_subscription(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ):
@@ -109,13 +111,13 @@ async def get_organization_subscription(
         Subscription.organization_id == auth.org_id,
         Subscription.status == "active"
     ).first()
-    
+
     if not subscription:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No active subscription found for this organization"
         )
-    
+
     return subscription
 
 
@@ -127,25 +129,25 @@ async def create_subscription(
     auth: AuthContext = Depends(get_current_user)
 ):
     """Create a new subscription for an organization"""
-    
+
     # Verify user has a valid organization
     if not auth.org_id or auth.org_id == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User must belong to an organization to create a subscription"
         )
-    
+
     # Verify plan exists
     plan = db.query(SubscriptionPlan).filter(
         SubscriptionPlan.id == subscription_data.plan_id
     ).first()
-    
+
     if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Subscription plan not found"
         )
-         
+
     subscription = SubscriptionService.create_subscription(
         db=db,
         organization_id=auth.org_id,
@@ -155,9 +157,9 @@ async def create_subscription(
         background_tasks=background_tasks,
     )
 
-    # Generate explicit authorization payload containing updated permissions 
+    # Generate explicit authorization payload containing updated permissions
     auth_payload = generate_auth_payload(db, auth.user_id)
-    
+
     return {
         "subscription": subscription,
         "access_token": auth_payload["access_token"],
@@ -173,53 +175,53 @@ async def create_payment_intent(
     auth: AuthContext = Depends(get_current_user)
 ):
     """Create a Stripe Payment Intent for embedded payment element"""
-    
+
     if not auth.org_id or auth.org_id == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User must belong to an organization to create a payment intent"
         )
-    
+
     plan = db.query(SubscriptionPlan).filter(
         SubscriptionPlan.id == request.plan_id,
-        SubscriptionPlan.is_active == True
+        SubscriptionPlan.is_active
     ).first()
-    
+
     if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Subscription plan not found or inactive"
         )
-    
+
     if plan.price == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Use the subscription endpoint for free plans"
         )
-    
+
     organization = db.query(Organization).filter(
         Organization.id == auth.org_id
     ).first()
-    
+
     if not organization:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organization not found"
         )
-    
+
     if not settings.STRIPE_SECRET_KEY:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Stripe is not configured"
         )
-    
+
     stripe.api_key = settings.STRIPE_SECRET_KEY
-    
+
     try:
         existing_subscription = db.query(Subscription).filter(
             Subscription.organization_id == auth.org_id
         ).first()
-        
+
         if existing_subscription and existing_subscription.stripe_customer_id:
             stripe_customer_id = existing_subscription.stripe_customer_id
         else:
@@ -230,9 +232,9 @@ async def create_payment_intent(
                 }
             )
             stripe_customer_id = customer.id
-        
+
         amount = int(plan.price * 100)
-        
+
         payment_intent = stripe.PaymentIntent.create(
             amount=amount,
             currency=plan.currency,
@@ -243,12 +245,12 @@ async def create_payment_intent(
                 "plan_id": str(request.plan_id),
             },
         )
-        
+
         return {
             "client_secret": payment_intent.client_secret,
             "payment_intent_id": payment_intent.id,
         }
-    
+
     except Exception as e:
         logger.error(f"Stripe error creating payment intent: {str(e)}")
         raise HTTPException(
@@ -265,35 +267,35 @@ async def confirm_payment(
     auth: AuthContext = Depends(get_current_user)
 ):
     """Confirm payment and create subscription after successful payment"""
-    
+
     plan = db.query(SubscriptionPlan).filter(
         SubscriptionPlan.id == request.plan_id
     ).first()
-    
+
     if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Subscription plan not found"
         )
-    
+
     organization = db.query(Organization).filter(
         Organization.id == auth.org_id
     ).first()
-    
+
     if not organization:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organization not found"
         )
-    
+
     if not settings.STRIPE_SECRET_KEY:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Stripe is not configured"
         )
-    
+
     stripe.api_key = settings.STRIPE_SECRET_KEY
-    
+
     try:
         payment_intent = stripe.PaymentIntent.retrieve(request.payment_intent_id)
 
@@ -302,9 +304,9 @@ async def confirm_payment(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Payment not completed. Status: {payment_intent.status}"
             )
-        
+
         stripe_customer_id = str(payment_intent.customer) if payment_intent.customer else None
-        
+
         subscription = SubscriptionService.create_subscription(
             db=db,
             organization_id=auth.org_id,
@@ -316,9 +318,9 @@ async def confirm_payment(
 
         # Build fresh payload containing newly minted subscription variables
         auth_payload = generate_auth_payload(db, auth.user_id)
-        
+
         logger.info(f"Subscription created for org {auth.org_id} on plan {request.plan_id}")
-        
+
         return {
             "success": True,
             "message": "Subscription activated successfully",
@@ -327,7 +329,7 @@ async def confirm_payment(
             "token_type": auth_payload["token_type"],
             "user": auth_payload["user"],
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -336,4 +338,65 @@ async def confirm_payment(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create subscription"
+        )
+
+
+@router.post("/buy-tokens", response_model=BuyTokensResponse)
+async def buy_tokens_from_wallet(
+    request: BuyTokensRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    """Buy AI tokens from wallet balance.
+    
+    Pricing: 10000 tokens = £2.00 (or equivalent in currency)
+    """
+
+    if not auth.org_id or auth.org_id == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User must belong to an organization to purchase tokens"
+        )
+
+    if request.token_amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token amount must be greater than 0"
+        )
+
+    try:
+        result = SubscriptionService.buy_tokens_from_wallet(
+            db=db,
+            organization_id=auth.org_id,
+            token_amount=request.token_amount,
+            background_tasks=background_tasks,
+        )
+
+        logger.info(
+            f"User {auth.user_id} purchased {request.token_amount} tokens "
+            f"for organization {auth.org_id}"
+        )
+
+        return BuyTokensResponse(
+            success=result["success"],
+            message="Tokens purchased successfully",
+            tokens_purchased=result["tokens_purchased"],
+            total_tokens=result["total_tokens"],
+            wallet_balance_remaining=result["wallet_balance_remaining"],
+            currency=result["currency"],
+        )
+
+    except ValueError as e:
+        logger.warning(f"Token purchase validation error for org {auth.org_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error purchasing tokens for org {auth.org_id}: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to purchase tokens"
         )

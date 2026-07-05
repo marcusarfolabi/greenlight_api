@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Any, List, Optional
 from datetime import datetime
 
@@ -9,13 +9,13 @@ class QuestionSchema(BaseModel):
     time_limit_seconds: int = Field(ge=5, le=300)
     point_value: int
     type: str = "multiple_choice"  # multiple_choice, multiple_select, true_false, numeric, short_answer
-    
+
     options: List[str] = []
-    
+
     correct_option_index: Optional[int] = None
-    
+
     correct_answer_string: Optional[str] = None
-    
+
     correct_answers: Optional[List[int]] = None  # For multiple_select, list of correct
     is_ai_generated: bool = False
     ai_tokens_cost: int = 0
@@ -41,7 +41,7 @@ class QuestionResponse(QuestionSchema):
                     options = [opt.text if hasattr(opt, "text") else str(opt) for opt in data.options_json]
             else:
                 options = []
-            
+
             return {
                 'id': data.id,
                 'prompt_text': data.prompt_text,
@@ -62,7 +62,6 @@ class QuestionResponse(QuestionSchema):
 
 class ArenaCreate(BaseModel):
     arena_name: str
-    category: str
     is_public: bool
     questions: List[QuestionSchema]
 
@@ -78,7 +77,6 @@ class AIQuestionGenerationRequest(BaseModel):
 class ArenaUpdate(BaseModel):
     arena_name: Optional[str] = None
     status: Optional[str] = None  # active, draft, deleted
-    category: Optional[str] = None
     is_public: Optional[bool] = None
     questions: Optional[List[QuestionSchema]] = None
 
@@ -96,7 +94,6 @@ class ArenaTokenInfo(BaseModel):
 class ArenaResponse(BaseModel):
     id: str
     arena_name: str
-    category: str
     is_public: bool
     creator_id: int
     creator_organization_id: Optional[int] = None

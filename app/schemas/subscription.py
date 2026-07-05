@@ -12,6 +12,19 @@ class ConfirmPaymentRequest(BaseModel):
     organization_id: int
     plan_id: int
     payment_intent_id: str
+
+
+class BuyTokensRequest(BaseModel):
+    token_amount: int  # Number of tokens to buy
+
+
+class BuyTokensResponse(BaseModel):
+    success: bool
+    message: str
+    tokens_purchased: int
+    total_tokens: int
+    wallet_balance_remaining: int
+    currency: str
 class SubscriptionPlanTypeSchema(str, Enum):
     FREE = "free"
     STANDARD = "standard"

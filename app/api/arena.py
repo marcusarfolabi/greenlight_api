@@ -143,7 +143,6 @@ async def create_arena(
         # 3. Create Arena
         new_arena = Arena(
             arena_name=data.arena_name,
-            category=data.category,
             creator_id=current_user.user_id,
             creator_organization_id=org.id,
             is_public=data.is_public,
@@ -300,7 +299,6 @@ async def list_arenas(
             {
                 "id": a.id,
                 "arena_name": a.arena_name,
-                "category": a.category,
                 "is_public": a.is_public,
                 "creator_id": a.creator_id,
                 "creator_organization_id": a.creator_organization_id,
@@ -347,7 +345,7 @@ async def get_arena(
     # Calculate token info
     ai_generated = (
         db.query(Question)
-        .filter(Question.arena_id == arena_id, Question.is_ai_generated == True)
+        .filter(Question.arena_id == arena_id, Question.is_ai_generated)
         .count()
     )
 
@@ -375,7 +373,6 @@ async def get_arena(
     return ArenaDetailResponse(
         id=arena.id,
         arena_name=arena.arena_name,
-        category=arena.category,
         is_public=arena.is_public,
         access_code=arena.access_code,
         questions=[
@@ -413,9 +410,7 @@ async def update_arena(
 
     # Update base fields if provided
     if data.arena_name:
-        arena.arena_name = data.arena_name
-    if data.category:
-        arena.category = data.category
+        arena.arena_name = data.arena_name 
     if data.is_public is not None:
         arena.is_public = data.is_public
 
