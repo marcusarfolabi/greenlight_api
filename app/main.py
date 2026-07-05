@@ -127,13 +127,13 @@ async def get_open_api_endpoint(
 app.add_middleware(
     CORSMiddleware,
     # allow_origins=settings.CORS_ORIGINS,
-    allow_origins=["http://localhost:3000", "https://greenlight.webshoptechnology.us"],
+    allow_origins=["http://localhost:3000", "https://greenlightquiz.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(api_router, prefix="/api/v1")
+app.include_router(api_router, prefix="/v1")
 
 @app.get("/")
 async def root():
