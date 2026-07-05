@@ -1,24 +1,21 @@
 import os
 import logging
 from dotenv import load_dotenv
+from app.api import api_router
+from app.db.session import engine
+from app.models import Base
+from app.core.config import settings
+from sqlalchemy.exc import OperationalError
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 
-from sqlalchemy import text
-load_dotenv(dotenv_path=".env.docker")
-
-
-from app.api import api_router
-from app.db.session import engine
-from app.models import Base
-from app.core.config import settings
-from sqlalchemy.exc import OperationalError
 from app.scripts.admin_seeder import seed_superadmin
 from app.scripts.subscription_seeder import seed_subscription_plans
 
+load_dotenv(dotenv_path=".env.docker")
 logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
@@ -64,7 +61,7 @@ async def startup_event():
         logger.info("Database forcefully wiped, recreated, and seeded fresh!")
     except OperationalError as e:
         logger.error(
-            "Database connection failed on startup. "
+            f"Database connection failed on startup. {e} "
             "Check DB_HOST/DB_PORT/POSTGRES_* settings and whether the database is reachable."
         )
         raise
@@ -138,7 +135,7 @@ app.include_router(api_router, prefix="/v1")
 @app.get("/")
 async def root():
     try:
-        with engine.connect() as conn:
+        with engine.connect() :
             return {
                 "status": "Greenlight is operational",
                 "environment": os.getenv("ENVIRONMENT"),
