@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class OrganizationBase(BaseModel):
     name: str
     subdomain: str
-    industry: str 
+    industry: str
     capped_tokens: Optional[int] = None
     stripe_connect_id: Optional[str] = None
     city: Optional[str] = None
@@ -27,7 +27,6 @@ class OrganizationUpdate(BaseModel):
     subdomain: Optional[str] = None
     industry: Optional[str] = None
     is_verified: Optional[bool] = None
-    stripe_connect_id: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     country: Optional[str] = None
@@ -60,9 +59,6 @@ class PayoutRuleResponse(PayoutRuleCreate):
 
     id: int
     organization_id: int
-    stripe_product_id: Optional[str] = None
-    stripe_price_id: Optional[str] = None
-    stripe_transfer_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -139,11 +135,6 @@ class OrgSettingsResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    stripe_connect_id: Optional[str] = None
-    stripe_charges_enabled: bool = False
-    stripe_payouts_enabled: bool = False
-    stripe_details_submitted: bool = False
-
     # Branding
     brand_color: str
 
@@ -163,12 +154,11 @@ class OrgSettingsResponse(BaseModel):
     request_payout_details: bool
     payout_method: str
     payout_rules: List[PayoutRuleResponse]
-    stripe_connect: StripeConnectStatus = Field(default_factory=StripeConnectStatus)
 
 
 class OrgSettingsSaveResponse(OrgSettingsResponse):
     """Returned after saving settings; may include a Stripe onboarding redirect URL."""
-    stripe_onboarding_url: Optional[str] = None
+    # stripe_onboarding_url: Optional[str] = None
 
 
 # ===== Wallet Top-up Schemas

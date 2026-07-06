@@ -1,41 +1,40 @@
 import logging
-from app.models.arena import Arena
-from fastapi import APIRouter, Depends, HTTPException, status 
-from sqlalchemy.orm import Session
-
 from app.db.session import get_db
-from app.core.security import create_access_token, get_current_user  
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+import stripe  # type: ignore
+from app.core.config import settings
+from fastapi import BackgroundTasks
+
+from app.core.security import create_access_token, get_current_user
 
 from app.schemas.organization import (
     OrganizationCreate, OrgSettingsUpdate, OrgSettingsResponse, OrgSettingsSaveResponse,
     PayoutRuleCreate, PayoutRuleResponse,
     WalletSummaryResponse,
 )
-from app.services.stripe_connect import StripeConnectService
-import stripe  # type: ignore
-from app.core.config import settings
-from fastapi import BackgroundTasks
+from app.models.arena import Arena
 from app.schemas.organization import CreateTopUpRequest, ConfirmTopUpRequest
 from app.models.wallet import Transaction, TransactionType
 from app.models.subscription import Subscription
 from app.models.organization import PayoutRule
-from app.services.user_service import UserService           
+from app.services.user_service import UserService
 from app.services.organization import OrganizationService
-from app.schemas.user import AuthContext 
+from app.schemas.user import AuthContext
 
 
 router = APIRouter()
-logger = logging.getLogger(__name__) 
+logger = logging.getLogger(__name__)
 
 
 @router.post("")
 async def setup_user_organization(
-    org_data: OrganizationCreate, 
-    db: Session = Depends(get_db), 
+    org_data: OrganizationCreate,
+    db: Session = Depends(get_db),
     auth: AuthContext = Depends(get_current_user)
 ):
     user_id = auth.user_id
-    
+
     user = UserService.get_user(db, user_id=user_id)
     if not user:
         raise HTTPException(
@@ -52,9 +51,9 @@ async def setup_user_organization(
     new_org = OrganizationService.create_organization_for_user(
         db=db, user_id=auth.user_id, org_data=org_data
     )
-    
+
     hasSub = UserService.user_has_subscription(db, new_org.id)
-    
+
     # Pack the freshly created org_id into the new JWT payload
     token_data = {
         "sub": str(user.id),
@@ -63,9 +62,9 @@ async def setup_user_organization(
         "org_id": new_org.id,
         "has_subscription": hasSub
     }
-    
+
     access_token = create_access_token(data=token_data)
-    
+
     # Construct an updated user profile layout block for the frontend
     user_data = {
         "id": user.id,
@@ -77,7 +76,7 @@ async def setup_user_organization(
         "hasSub": hasSub,
         "subdomain": new_org.subdomain
     }
-    
+
     # Return everything explicitly via JSON
     return {
         "organization": new_org,
@@ -132,8 +131,6 @@ async def update_organization_settings(
             detail="Organization not found"
         )
 
-    stripe_onboarding_url = None
-
     # Update branding settings
     if settings_data.branding:
         org.brand_color = settings_data.branding.brand_color
@@ -156,12 +153,12 @@ async def update_organization_settings(
         org.enable_payouts = settings_data.payouts.enable_payouts
         org.request_payout_details = settings_data.payouts.request_payout_details
         org.payout_method = settings_data.payouts.payout_method
-        
+
         # Update payout rules if provided
         if settings_data.payouts.payout_rules is not None:
             # Clear existing rules
             db.query(PayoutRule).filter(PayoutRule.organization_id == org.id).delete()
-            
+
             # Add new rules
             for rule_data in settings_data.payouts.payout_rules:
                 new_rule = PayoutRule(
@@ -172,14 +169,13 @@ async def update_organization_settings(
                 db.add(new_rule)
 
         db.flush()
-        
+
     db.commit()
     db.refresh(org)
 
     settings_response = OrganizationService.build_settings_response(org)
     return OrgSettingsSaveResponse(
         **settings_response.model_dump(),
-        stripe_onboarding_url=stripe_onboarding_url,
     )
 
 
@@ -322,7 +318,7 @@ async def get_payout_rules(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organization not found"
         )
-    
+
     return org.payout_rules
 
 
@@ -339,19 +335,19 @@ async def create_payout_rule(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organization not found"
         )
-    
+
     # Check if rule for this position already exists
     existing_rule = db.query(PayoutRule).filter(
         PayoutRule.organization_id == org.id,
         PayoutRule.position == rule_data.position
     ).first()
-    
+
     if existing_rule:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Payout rule for position '{rule_data.position}' already exists"
         )
-    
+
     new_rule = PayoutRule(
         organization_id=org.id,
         position=rule_data.position,
@@ -377,18 +373,18 @@ async def update_payout_rule(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organization not found"
         )
-    
+
     rule = db.query(PayoutRule).filter(
         PayoutRule.id == rule_id,
         PayoutRule.organization_id == org.id
     ).first()
-    
+
     if not rule:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Payout rule not found"
         )
-    
+
     rule.position = rule_data.position
     rule.amount = rule_data.amount
     db.commit()
@@ -409,22 +405,22 @@ async def delete_payout_rule(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organization not found"
         )
-    
+
     rule = db.query(PayoutRule).filter(
         PayoutRule.id == rule_id,
         PayoutRule.organization_id == org.id
     ).first()
-    
+
     if not rule:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Payout rule not found"
         )
-    
+
     db.delete(rule)
     db.commit()
-    
-    
+
+
 @router.get("/arena-settings", response_model=OrgSettingsResponse)
 async def get_organization_arena_settings(
     access_code: int,
