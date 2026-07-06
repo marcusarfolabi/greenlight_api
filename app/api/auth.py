@@ -12,11 +12,12 @@ from google.auth.transport import requests as google_requests
 from app.core.config import settings
 from app.core.security import create_access_token, create_refresh_token, get_current_user, verify_password, hash_password
 from app.db.session import get_db
-from app.schemas.user import AuthContext, ForgotPasswordRequest, GoogleTokenPayload, ResendOTPRequest, ResetPasswordRequest, UserCreate, UserResponse, VerifyOTPRequest
+from app.schemas.user import AuthContext, ForgotPasswordRequest, GoogleTokenPayload, PushSubscriptionCreate, ResendOTPRequest, ResetPasswordRequest, UserCreate, UserResponse, VerifyOTPRequest
 from app.services.user_service import UserService
 from app.services.mail_service import mail_service
 from app.core.cache import otp_cache
 from app.core.recaptcha import verify_recaptcha
+from app.models.user import PushSubscription
 
 
 router = APIRouter()
@@ -404,3 +405,37 @@ async def logout():
     We simply return a success acknowledgment.
     """
     return {"detail": "Successfully logged out. Please clear token context parameters on the client layer."}
+
+
+@router.post("/push-subscriptions")
+async def upsert_push_subscription(
+    payload: PushSubscriptionCreate,
+    current_user: AuthContext = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    existing = None
+    if payload.fcm_token:
+        existing = db.query(PushSubscription).filter(PushSubscription.fcm_token == payload.fcm_token).first()
+
+    if existing is None:
+        # create new
+        new = PushSubscription(
+            user_id=current_user.user_id,
+            fcm_token=payload.fcm_token,
+            device_type=payload.device_type,
+            device_meta=payload.device_meta,
+        )
+        db.add(new)
+        db.commit()
+        db.refresh(new)
+        return {"detail": "Push subscription saved.", "id": new.id}
+
+    # update existing
+    existing.user_id = current_user.user_id
+    existing.device_type = payload.device_type
+    existing.device_meta = payload.device_meta
+    db.add(existing)
+    db.commit()
+    db.refresh(existing)
+
+    return {"detail": "Push subscription updated.", "id": existing.id}

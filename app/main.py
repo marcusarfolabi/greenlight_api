@@ -1,5 +1,6 @@
 import os
 import logging
+from sqlalchemy import text
 from dotenv import load_dotenv
 from app.api import api_router
 from app.db.session import engine
@@ -54,7 +55,7 @@ async def startup_event():
         #     else:
         #         logger.info("No tables discovered to drop.")
 
-        # Recreate tables cleanly from scratch
+        # Recreate tables cleanly from
         Base.metadata.create_all(bind=engine)
         seed_superadmin()
         seed_subscription_plans()

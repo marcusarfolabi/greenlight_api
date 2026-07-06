@@ -101,6 +101,10 @@ class Token(BaseModel):
     is_active: bool
     created_at: datetime
 
+class PushSubscriptionCreate(BaseModel):
+    fcm_token: str
+    device_type: Optional[str] = "fcm"
+    device_meta: Optional[dict] = None
 
 
 class TokenPayload(BaseModel):

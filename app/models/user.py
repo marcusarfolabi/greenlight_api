@@ -1,19 +1,23 @@
-from typing import Optional, TYPE_CHECKING
-from datetime import datetime
 import enum
-from sqlalchemy import String, Text, func, ForeignKey, Boolean
+from datetime import datetime
+from typing import TYPE_CHECKING, Optional
+
+from sqlalchemy import JSON, Boolean, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.wallet import Wallet
+
 from .base import Base
 
 if TYPE_CHECKING:
     from .organization import Organization
 
+
 class UserRole(enum.Enum):
     USER = "user"
     HOST = "host"
     SUPERADMIN = "superadmin"
+
 
 class User(Base):
     __tablename__ = "users"
@@ -34,11 +38,17 @@ class User(Base):
 
     role: Mapped[str] = mapped_column(String(50), default="user")
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    email_verified_at: Mapped[Optional[datetime]] = mapped_column(nullable=True, default=None)
+    email_verified_at: Mapped[Optional[datetime]] = mapped_column(
+        nullable=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(insert_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        insert_default=func.now(), onupdate=func.now()
+    )
 
-    organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), nullable=True)
+    organization_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("organizations.id"), nullable=True
+    )
 
     # Relationships
     owned_organization: Mapped[Optional["Organization"]] = relationship(
@@ -52,14 +62,19 @@ class User(Base):
         back_populates="members",
         foreign_keys="[User.organization_id]",
     )
-    payout_profile: Mapped[Optional["PayoutProfile"]] = relationship(back_populates="user", uselist=False)
+    payout_profile: Mapped[Optional["PayoutProfile"]] = relationship(
+        back_populates="user", uselist=False
+    )
     wallet: Mapped[Optional["Wallet"]] = relationship(
         "Wallet",
         back_populates="user",
         foreign_keys=[Wallet.user_id],
         uselist=False,
     )
-    push_subscriptions: Mapped["PushSubscription"] = relationship("PushSubscription", back_populates="user", cascade="all, delete-orphan")
+    push_subscriptions: Mapped["PushSubscription"] = relationship(
+        "PushSubscription", back_populates="user", cascade="all, delete-orphan"
+    )
+
 
 class PayoutProfile(Base):
     __tablename__ = "payout_profiles"
@@ -74,15 +89,20 @@ class PayoutProfile(Base):
 
     user: Mapped["User"] = relationship(back_populates="payout_profile")
 
-
 class PushSubscription(Base):
     __tablename__ = "push_subscriptions"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-
-    endpoint: Mapped[str] = mapped_column(String(255), unique=True)
-    device_type: Mapped[str] = mapped_column(String(255))
-    keys: Mapped[str] = mapped_column(String(255))
+    
+    endpoint: Mapped[Optional[str]] = mapped_column(
+        String(255), unique=True, nullable=True
+    )
+    fcm_token: Mapped[Optional[str]] = mapped_column(
+        String(255), unique=True, nullable=True
+    )
+    device_type: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    keys: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    device_meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="push_subscriptions")
