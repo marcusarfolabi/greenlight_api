@@ -43,6 +43,33 @@ class ConnectionManager:
     def connection_count(self, access_code: str) -> int:
         return len(self.active.get(access_code, set()))
 
+    async def close_room(self, access_code: str):
+        """Close all WebSocket connections for a given access_code and cleanup timers/tasks."""
+        conns = list(self.active.get(access_code, set()))
+        if not conns:
+            logger.info("No connections to close for access_code=%s", access_code)
+            # ensure timers/tasks cleaned
+            task = self.timer_tasks.pop(access_code, None)
+            if task:
+                task.cancel()
+            self.timers.pop(access_code, None)
+            self.active.pop(access_code, None)
+            return
+
+        for ws in conns:
+            try:
+                await ws.close(code=1000)
+            except Exception:
+                logger.exception("Error closing websocket for access_code=%s", access_code)
+
+        # Cleanup internal state
+        self.active.pop(access_code, None)
+        task = self.timer_tasks.pop(access_code, None)
+        if task:
+            task.cancel()
+        self.timers.pop(access_code, None)
+        logger.info("Closed %s connections for access_code=%s", len(conns), access_code)
+
     async def broadcast(self, access_code: str, message: dict):
         conns = self.active.get(access_code, set())
         if not conns:

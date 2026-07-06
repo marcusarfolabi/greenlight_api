@@ -1,4 +1,4 @@
-from datetime import datetime, timezone 
+from datetime import datetime, timezone
 import enum
 import logging
 from typing import Optional
@@ -29,11 +29,11 @@ class UserService:
     @staticmethod
     def get_user_by_email(db: Session, email: str) -> Optional[User]:
         return db.query(User).filter(User.email == email).first()
-    
+
     @staticmethod
-    def get_user_by_google_id(db: Session, google_id: str) -> Optional[User]: 
+    def get_user_by_google_id(db: Session, google_id: str) -> Optional[User]:
         return db.query(User).filter(User.google_id == google_id).first()
-    
+
     @staticmethod
     def get_user_by_login(db: Session, login: str) -> Optional[User]:
         return (
@@ -43,9 +43,9 @@ class UserService:
         )
 
     @staticmethod
-    def create_user(db: Session, user_data: UserCreate) -> User: 
+    def create_user(db: Session, user_data: UserCreate) -> User:
         logger.debug("UserService.create_user initiated with user_data: %r", user_data.model_dump(exclude={"password"}))
-        
+
         google_id = getattr(user_data, "google_id", None)
         linkedin_id = getattr(user_data, "linkedin_id", None)
         apple_id = getattr(user_data, "apple_id", None)
@@ -57,7 +57,7 @@ class UserService:
         # Read country_iso from incoming payload
         incoming_country = getattr(user_data, "country_iso", None)
         logger.debug("Extracted incoming country_iso: %r", incoming_country)
-        
+
         if incoming_country:
             detected_currency = get_currency_by_country_code(incoming_country)
         else:
@@ -65,6 +65,7 @@ class UserService:
             detected_currency = "gbp"
 
         logger.info("Final currency evaluation for user registration setup: %r", detected_currency)
+
 
         db_user = User(
             email=user_data.email,
@@ -80,35 +81,40 @@ class UserService:
             email_verified_at=email_verified_at,
             location=getattr(user_data, "location", None) or incoming_country
         )
+        # if organization_id is provided, we should link the user to that organization
+        if getattr(user_data, "organization_id", None):
+            logger.info("Linking user to provided organization_id: %r", user_data.organization_id)
+            db_user.organization_id = user_data.organization_id
+            
         db.add(db_user)
-        db.flush() 
-        
+        db.flush()
+
         logger.debug("User flushed to database. Generated User ID: %r", db_user.id)
-        
+
         # Explicitly instantiate the wallet and print its state
         logger.info("Instantiating Wallet with user_id=%s, currency=%s", db_user.id, detected_currency)
         wallet = Wallet(user_id=db_user.id, currency=detected_currency)
-        
+
         db.add(wallet)
         db.commit()
-        
+
         # Final validation log after commit to see what actually saved
         db.refresh(db_user)
-        logger.info("Successfully registered user! DB Saved State -> wallet.currency: %r", 
+        logger.info("Successfully registered user! DB Saved State -> wallet.currency: %r",
                     db_user.wallet.currency if db_user.wallet else "No Wallet Found")
-                    
+
         return db_user
     @staticmethod
     def update_user_social_id(db: Session, user_id: int, provider_field: str, provider_id: str) -> Optional[User]:
         """
         Dynamically links any OAuth unique provider ID to an existing account profile.
-        
+
         :param provider_field: Must be "google_id", "linkedin_id", or "apple_id"
         :param provider_id: The unique identifier string received from OAuth handshake payload
         """
         if provider_field not in ["google_id", "linkedin_id", "apple_id"]:
             raise ValueError(f"Invalid social authentication provider field: {provider_field}")
-            
+
         db_user = UserService.get_user(db, user_id)
         if not db_user:
             return None
@@ -126,7 +132,7 @@ class UserService:
             return None
 
         update_data = user_update.model_dump(exclude_unset=True)
-        
+
         if "password" in update_data:
             raw_password = update_data.pop("password")
             if raw_password:
@@ -150,35 +156,35 @@ class UserService:
         db.delete(db_user)
         db.commit()
         return db_user
-    
+
     @staticmethod
     def user_has_subscription(db: Session, org_id: int) -> bool:
         existing = db.query(Subscription).filter(
             Subscription.organization_id == org_id,
             Subscription.status == "active"
-        ).first() 
+        ).first()
         return existing is not None
-    
+
     @staticmethod
     def user_has_org(db: Session, user_id: int) -> bool:
         user = UserService.get_user(db, user_id)
         if user is None:
             return False
         return user.owned_organization is not None
-    
+
     @staticmethod
     def get_user_org_id(db: Session, user_id: int) -> Optional[int]:
         user = UserService.get_user(db, user_id)
         if user is None or user.owned_organization is None:
             return None
         return user.owned_organization.id
-    
+
     @staticmethod
     def user_sub_domain(db: Session, user_id: int) -> Optional[str]:
         user = UserService.get_user(db, user_id)
         if user is None or user.owned_organization is None:
             return None
         return user.owned_organization.subdomain
-     
- 
+
+
 user_service = UserService()

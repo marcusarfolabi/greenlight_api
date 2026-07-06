@@ -1,14 +1,14 @@
-from typing import List, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 from datetime import datetime
 import enum
-from sqlalchemy import String, Enum, Text, func, ForeignKey, Boolean
+from sqlalchemy import String, Text, func, ForeignKey, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.wallet import Wallet
 from .base import Base
 
 if TYPE_CHECKING:
-    from .organization import Organization 
+    from .organization import Organization
 
 class UserRole(enum.Enum):
     USER = "user"
@@ -26,18 +26,18 @@ class User(Base):
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
     phone_number: Mapped[Optional[str]] = mapped_column(String(255))
     avatar: Mapped[Optional[str]] = mapped_column(String(255))
-    location: Mapped[Optional[str]] = mapped_column(Text, nullable=True)    
-    
+    location: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     google_id: Mapped[Optional[str]] = mapped_column(String(255))
     linkedin_id: Mapped[Optional[str]] = mapped_column(String(255))
-    apple_id: Mapped[Optional[str]] = mapped_column(String(255)) 
-    
-    role: Mapped[str] = mapped_column(String(50), default="user")    
+    apple_id: Mapped[Optional[str]] = mapped_column(String(255))
+
+    role: Mapped[str] = mapped_column(String(50), default="user")
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     email_verified_at: Mapped[Optional[datetime]] = mapped_column(nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(insert_default=func.now(), onupdate=func.now())
-    
+
     organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), nullable=True)
 
     # Relationships
@@ -65,24 +65,24 @@ class PayoutProfile(Base):
     __tablename__ = "payout_profiles"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
-    
+
     bank_name: Mapped[str] = mapped_column(String(100))
     account_holder_name: Mapped[str] = mapped_column(String(100))
     account_number: Mapped[str] = mapped_column(String(50))
     sort_code: Mapped[Optional[str]] = mapped_column(String(20))
     iban: Mapped[Optional[str]] = mapped_column(String(50))
-    
+
     user: Mapped["User"] = relationship(back_populates="payout_profile")
-    
-    
+
+
 class PushSubscription(Base):
     __tablename__ = "push_subscriptions"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    
+
     endpoint: Mapped[str] = mapped_column(String(255), unique=True)
     device_type: Mapped[str] = mapped_column(String(255))
-    keys: Mapped[str] = mapped_column(String(255)) 
+    keys: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
-    
+
     user: Mapped["User"] = relationship(back_populates="push_subscriptions")

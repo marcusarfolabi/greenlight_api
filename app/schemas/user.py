@@ -12,15 +12,15 @@ class AuthContext(BaseModel):
     org_id: int
     role: str
     username: str
-    
+
 class ResendOTPRequest(BaseModel):
     email: EmailStr
 
 class VerifyOTPRequest(BaseModel):
     email: EmailStr
     otp: str
- 
-    
+
+
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
@@ -33,19 +33,20 @@ class TokenRefreshRequest(BaseModel):
 
 class GoogleTokenPayload(BaseModel):
     token: str
-    
+
 class UserBase(BaseModel):
     username: str
     email: EmailStr
 
 class UserCreate(UserBase):
     password: str
-    role: str = "user" 
+    role: str = "user"
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    phone_number: Optional[str] = None  
+    phone_number: Optional[str] = None
+    organization_id: Optional[str] = None
     is_active: Optional[bool] = False
-    google_id: Optional[str] = None 
+    google_id: Optional[str] = None
     location: Optional[str] = None
     country_iso: Optional[str] = None
     recaptcha_token: Optional[str] = None
@@ -58,19 +59,19 @@ class UserOrgCreate(BaseModel):
         if self.user.role == UserRole.HOST and self.organization is None:
             raise ValueError("Organization data is required when role is HOST")
         return self
-    
+
 
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    phone_number: Optional[str] = None 
+    phone_number: Optional[str] = None
     email: Optional[EmailStr] = None
-    avatar: Optional[str] = None 
-    location: Optional[str] = None 
+    avatar: Optional[str] = None
+    location: Optional[str] = None
     is_active: Optional[bool] = None
-    password: Optional[str] = None 
+    password: Optional[str] = None
 
 
 class UserResponse(UserBase):
@@ -83,8 +84,8 @@ class UserResponse(UserBase):
     owned_organization: Optional[OrganizationResponse] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    phone_number: Optional[str] = None 
-    avatar: Optional[str] = None 
+    phone_number: Optional[str] = None
+    avatar: Optional[str] = None
     username: str
     email: EmailStr
 
@@ -98,8 +99,8 @@ class Token(BaseModel):
     email: str
     id: int
     is_active: bool
-    created_at: datetime 
-    
+    created_at: datetime
+
 
 
 class TokenPayload(BaseModel):

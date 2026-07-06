@@ -74,3 +74,19 @@ class PlayerScoreboardResponse(BaseModel):
     last_answered_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PlayerBankingProfileCreate(BaseModel):
+    account_holder_name: str
+    email: str
+    routing_number: Optional[str] = None
+    account_number: Optional[str] = None
+    bank_code: Optional[str] = None
+    payout_method: Optional[str] = "bank_transfer"
+
+
+class PlayerBankingProfileResponse(PlayerBankingProfileCreate):
+    id: Optional[int] = None
+    player_id: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)

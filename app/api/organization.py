@@ -209,7 +209,7 @@ async def create_wallet_topup(
 
     try:
         # Try to reuse an existing subscription customer if present
-        existing_sub = db.query(Subscription).filter(Subscription.organization_id == auth.org_id, Subscription.stripe_customer_id != None).first()
+        existing_sub = db.query(Subscription).filter(Subscription.organization_id == auth.org_id, Subscription.stripe_customer_id is not None).first()
         if existing_sub and existing_sub.stripe_customer_id:
             stripe_customer_id = existing_sub.stripe_customer_id
         else:
@@ -284,7 +284,7 @@ async def confirm_wallet_topup(
             type=TransactionType.DEPOSIT,
             stripe_reference=payment_intent.id,
             status="completed",
-            description=f"Top-up via Stripe",
+            description="Top-up via Stripe",
         )
         db.add(tx)
 

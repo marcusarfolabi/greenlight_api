@@ -5,7 +5,6 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-import stripe
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -28,7 +27,7 @@ from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.arena import Arena, ArenaTokenUsageLog, Question
 from app.models.organization import ArenaPayoutReport
-from app.models.player import Player, PlayerAnswerScore
+from app.models.player import Player, PlayerAnswerScore, PlayerBankingProfile
 from app.models.user import User
 from app.schemas.arena import (
     AIQuestionGenerationRequest,
@@ -41,7 +40,13 @@ from app.schemas.arena import (
     QuestionResponse,
     TokenUsageResponse,
 )
-from app.schemas.player import LobbyResponse, PlayerResponse, PlayerScoreboardResponse
+from app.schemas.player import (
+    LobbyResponse,
+    PlayerResponse,
+    PlayerScoreboardResponse,
+    PlayerBankingProfileCreate,
+    PlayerBankingProfileResponse,
+)
 from app.schemas.user import AuthContext
 from app.services.ai_question_service import AIQuestionGenerationService
 from app.services.mail_service import MailService
@@ -410,7 +415,7 @@ async def update_arena(
 
     # Update base fields if provided
     if data.arena_name:
-        arena.arena_name = data.arena_name 
+        arena.arena_name = data.arena_name
     if data.is_public is not None:
         arena.is_public = data.is_public
 
@@ -757,6 +762,44 @@ async def validate_access_code(
         logger.exception("Failed to broadcast lobby update")
 
     return response_payload
+
+
+@router.post("/players/{player_id}/banking", response_model=PlayerBankingProfileResponse)
+async def save_player_banking_profile(
+    player_id: int,
+    data: PlayerBankingProfileCreate,
+    db: Session = Depends(get_db),
+):
+    """Create or update a player's banking/payout profile."""
+    player = db.query(Player).filter(Player.id == player_id).first()
+    if not player:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Player not found")
+
+    # Upsert banking profile
+    profile = db.query(PlayerBankingProfile).filter(PlayerBankingProfile.player_id == player_id).first()
+    if not profile:
+        profile = PlayerBankingProfile(
+            player_id=player_id,
+            account_holder_name=data.account_holder_name,
+            email=data.email,
+            routing_number=data.routing_number,
+            account_number=data.account_number,
+            bank_code=data.bank_code,
+            payout_method=data.payout_method or "bank_transfer",
+        )
+        db.add(profile)
+    else:
+        profile.account_holder_name = data.account_holder_name
+        profile.email = data.email
+        profile.routing_number = data.routing_number
+        profile.account_number = data.account_number
+        profile.bank_code = data.bank_code
+        profile.payout_method = data.payout_method or profile.payout_method
+
+    db.commit()
+    db.refresh(profile)
+
+    return profile
 
 
 @router.get("/organization/players", response_model=list[PlayerResponse])
@@ -1281,10 +1324,11 @@ async def send_participants_message(
     for contact in contacts_list:
         target = contact.get("phone") or contact.get("email")
         recipient_name = contact.get("name") or "Participant"
-        payload_message = f"{message} Join here: https://greenlightquiz.com/arena/{arena.id} with access code {arena.access_code}"
+        # Using a clean inline if/else to add the message and a newline only if it exists
+        payload_message = f"{message}\n" if message else ""
+        payload_message += f"Join here: https://greenlightquiz.com/play/lobby?access_code={arena.access_code} and enter your preferred username"
 
         if channel == "sms":
-            # ✅ FIX: Forced access code to integer fallback to clear 'int | None' mismatch error
             background_tasks.add_task(
                 _bg_send_sms,
                 target,
@@ -1332,7 +1376,6 @@ async def get_lobby_info(
             status_code=status.HTTP_404_NOT_FOUND, detail="Invalid access code"
         )
 
-    # return a lobby summary with all participants currently in the arena
     players = db.query(Player).filter(Player.arena_id == arena.id).all()
     players_list = []
     for p in players:
@@ -1452,13 +1495,10 @@ def get_arena_scoreboard(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Arena not found"
         )
-
-    # Get all players for this arena with their scores aggregated
     players = db.query(Player).filter(Player.arena_id == arena_id).all()
 
     scoreboard_data = []
     for player in players:
-        # Get all answers for this player in this arena
         answers = (
             db.query(PlayerAnswerScore)
             .filter(
@@ -1507,7 +1547,6 @@ def get_arena_scoreboard(
 
 
 async def close_arena_and_build_payout_ledger(arena_id: str, db: Session):
-    # 1. Fetch all active participants who completed or played in the arena
     players = (
         db.query(Player)
         .filter(Player.arena_id == arena_id, Player.status == "completed")
@@ -1517,8 +1556,7 @@ async def close_arena_and_build_payout_ledger(arena_id: str, db: Session):
     if not players:
         return
 
-    # 2. Sort players logically by score descending (Break ties using correct answers)
-    # Higher scores first; if scores are equal, player with more correct answers wins
+    # Higher scores first;
     sorted_players = sorted(
         players, key=lambda p: (p.score or 0, p.correct_answers or 0), reverse=True
     )
@@ -1557,75 +1595,6 @@ async def close_arena_and_build_payout_ledger(arena_id: str, db: Session):
         db.add(payout_entry)
 
     db.commit()
-
-
-def process_automated_stripe_payouts(db: Session):
-    """
-    Processes all pending arena payout ledger rows using Stripe Transfers
-    by resolving recipient routing tokens via PlayerBankingProfile.
-    """
-    pending_payouts = (
-        db.query(ArenaPayoutReport)
-        .filter(
-            ArenaPayoutReport.payout_status == "pending",
-            ArenaPayoutReport.payout_amount_cents > 0,
-        )
-        .all()
-    )
-
-    for payout in pending_payouts:
-        try:
-            payout.payout_status = "processing"
-            db.commit()
-
-            banking_profile = payout.player.banking_profile if payout.player else None
-
-            if not banking_profile:
-                payout.payout_status = "failed"
-                payout.payout_error_message = (
-                    "Player banking profile details are missing entirely."
-                )
-                db.commit()
-                continue
-
-            destination_id = banking_profile.external_recipient_id
-
-            if not destination_id:
-                payout.payout_status = "failed"
-                payout.payout_error_message = (
-                    "Missing a valid Stripe connected account destination token."
-                )
-                db.commit()
-                continue
-
-            # ✅ FIX: Every single dictionary value cast to strict string for Stripe Type invariance
-            transfer = stripe.Transfer.create(
-                amount=payout.payout_amount_cents,
-                currency="usd",
-                destination=destination_id,
-                metadata={
-                    "arena_id": str(payout.arena_id),
-                    "player_id": str(payout.player_id),
-                    "player_username": str(payout.username or ""),
-                    "rank": str(payout.final_rank),
-                },
-            )
-
-            # ✅ FIX: Mapped to 'transfer_reference' to match your schema column definitions
-            payout.transfer_reference = transfer.id
-            payout.payout_status = "paid"
-            payout.processed_at = datetime.utcnow()
-            payout.payout_error_message = None
-
-        except Exception as stripe_err:
-            db.rollback()
-            payout.payout_status = "failed"
-            payout.payout_error_message = str(stripe_err)
-            logger.exception(
-                f"Stripe API execution failed on payout row ID {payout.id}: {stripe_err}"
-            )
-
-        db.commit()
 
 
 @router.websocket("/ws/lobby/{access_code}")
@@ -1841,6 +1810,11 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                                 },
                             },
                         )
+                        # Close all websocket connections for this arena to avoid lingering sockets
+                        try:
+                            await ws_manager.close_room(str(arena.access_code))
+                        except Exception:
+                            logger.exception("Error closing websockets for arena %s", arena.id)
                     except Exception as e:
                         logger.exception(
                             f"Critical payout calculation failure on arena {arena.id}: {e}"
