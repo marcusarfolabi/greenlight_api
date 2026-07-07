@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from app.core.config import settings
 from app.core.security import hash_password
-from app.db.session import SessionLocal 
+from app.db.session import SessionLocal
 from app.models.user import User, UserRole
 from app.models.wallet import Wallet
 from app.models.organization import Organization
@@ -15,9 +15,9 @@ from app.models.subscription import Subscription, SubscriptionPlan, Subscription
 def seed_superadmin():
     """Seeds the default system superadmin and corresponding operational platform wallet
     using credentials automatically loaded by the application config layer from environment variables."""
-    
+
     admin_username = getattr(settings, "ADMIN_USERNAME", "superadmin")
-    admin_email = getattr(settings, "ADMIN_EMAIL", "admin@greenlight.app")
+    admin_email = getattr(settings, "ADMIN_EMAIL", "admin@greenlightquiz.com")
     admin_firstname = getattr(settings, "ADMIN_FIRSTNAME", "Moses")
     admin_lastname = getattr(settings, "ADMIN_LASTNAME", "David")
     admin_raw_password = getattr(settings, "ADMIN_PASSWORD", ".Admin!Green@151k")
@@ -27,7 +27,7 @@ def seed_superadmin():
 
     try:
         print(f"Verifying existence of superadmin account: '{admin_username}' ({admin_email})...")
-        
+
         existing_admin = session.query(User).filter(
             (User.email == admin_email) | (User.username == admin_username)
         ).first()
@@ -49,13 +49,13 @@ def seed_superadmin():
             role=UserRole.SUPERADMIN.value,
             is_active=True
         )
-        
+
         session.add(admin_user)
         session.flush()
 
         print(f"Initializing standard core system user wallet (Target ID: {admin_user.id})...")
         admin_wallet = Wallet(
-            user_id=admin_user.id, 
+            user_id=admin_user.id,
             currency="gbp"
         )
         session.add(admin_wallet)
@@ -94,7 +94,7 @@ def seed_superadmin():
         if existing_org_wallet:
             print(f"⚠️ Organization wallet already exists (Wallet ID: {existing_org_wallet.id}). Linking to organization...")
             existing_org_wallet.organization_id = admin_org.id
-            session.add(existing_org_wallet) 
+            session.add(existing_org_wallet)
 
         # ===== Attach existing PRO subscription plan to the organization =====
         print("Looking up existing PRO subscription plan...")
