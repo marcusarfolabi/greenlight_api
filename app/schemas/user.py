@@ -88,6 +88,9 @@ class UserResponse(UserBase):
     avatar: Optional[str] = None
     username: str
     email: EmailStr
+    google_id: Optional[str] = None
+    linkedin_id: Optional[str] = None
+    apple_id: Optional[str] = None
 
 class Token(BaseModel):
     model_config = ConfigDict(from_attributes=True) # Pydantic V2

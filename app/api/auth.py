@@ -80,6 +80,9 @@ async def login(
             "id": user.id,
             "username": user.username,
             "email": user.email,
+            "google_id": user.google_id,
+            "linkedin_id": user.linkedin_id,
+            "apple_id": user.apple_id,
             "role": user.role,
             "hasOrg": hasOrg,
             "org_id": org_id,
@@ -228,7 +231,10 @@ async def auth_google(
                 "created_at": user.created_at.isoformat() if hasattr(user.created_at, "isoformat") else user.created_at,
                 "hasOrg": hasOrg,
                 "org_id": org_id,
-                "hasSub": hasSub
+                "hasSub": hasSub,
+                "google_id": user.google_id,
+                "linkedin_id": user.linkedin_id,
+                "apple_id": user.apple_id
             }
         }
 
