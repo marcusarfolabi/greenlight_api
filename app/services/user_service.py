@@ -85,7 +85,7 @@ class UserService:
         if getattr(user_data, "organization_id", None):
             logger.info("Linking user to provided organization_id: %r", user_data.organization_id)
             db_user.organization_id = user_data.organization_id
-            
+
         db.add(db_user)
         db.flush()
 
@@ -104,6 +104,7 @@ class UserService:
                     db_user.wallet.currency if db_user.wallet else "No Wallet Found")
 
         return db_user
+
     @staticmethod
     def update_user_social_id(db: Session, user_id: int, provider_field: str, provider_id: str) -> Optional[User]:
         """
@@ -120,6 +121,14 @@ class UserService:
             return None
 
         setattr(db_user, provider_field, provider_id)
+        # When linking a social account, treat this as verified and active
+        try:
+            db_user.is_active = True
+            db_user.email_verified_at = datetime.now(timezone.utc)
+        except Exception:
+            # best-effort: ignore if attributes missing
+            pass
+
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
