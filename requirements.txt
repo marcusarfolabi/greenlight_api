@@ -10,9 +10,6 @@ fastapi-mail
 requests
 httpx
 stripe
-# google-genai
-# google-auth
-
 google-genai>=2.6.0
 google-auth>=2.0.0
 twilio>=8.0.0
