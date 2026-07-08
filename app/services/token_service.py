@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.arena import Arena
-from app.models.user import User
+from app.models.player import Player
 from app.models.subscription import Subscription
 from app.core.config import settings
 from app.models.organization import Organization
@@ -207,8 +207,13 @@ class TokenService:
     
     # determine if the organization can add more players according to their subscription plan
     @staticmethod
-    def can_add_players(db: Session, organization_id: int, additional_players: int) -> tuple[bool, Optional[str]]:
-        """Check if organization can add more players based on subscription limits"""
+    def can_add_players(
+        db: Session,
+        organization_id: int,
+        additional_players: int,
+        arena_id: str,
+    ) -> tuple[bool, Optional[str]]:
+        """Check if an arena can admit more players based on org subscription limits."""
         subscription = db.query(Subscription).filter(
             Subscription.organization_id == organization_id,
             Subscription.status == "active"
@@ -217,11 +222,14 @@ class TokenService:
         if not subscription:
             return False, "No active subscription"
 
-        current_player_count = db.query(User).filter(
-            User.organization_id == organization_id
+        current_player_count = db.query(Player).filter(
+            Player.arena_id == arena_id
         ).count()
 
         if subscription.plan.max_players is not None and (current_player_count + additional_players) > subscription.plan.max_players:
-            return False, f"Player limit reached. Max allowed: {subscription.plan.max_players}"
+            return (
+                False,
+                f"Arena capacity reached for your plan. Max allowed: {subscription.plan.max_players}",
+            )
 
         return True, None

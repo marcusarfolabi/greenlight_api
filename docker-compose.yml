@@ -1,34 +1,11 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: greenlight_postgres
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:5432:5432"
-    env_file:
-      - .env.docker
-    environment:
-      POSTGRES_USER: greenlight      
-      POSTGRES_PASSWORD: greenlight  
-      POSTGRES_DB: greenlight_db
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U greenlight -d greenlight_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   greenlight_api:
     image: ghcr.io/greenlightquiz/backend:latest
     container_name: greenlight_api
     restart: unless-stopped
     environment:
       - PORT=8000
+      - DATABASE_URL=${DATABASE_URL}
     env_file:
       - .env.docker
     ports:
@@ -37,9 +14,3 @@ services:
       resources:
         limits:
           memory: 200M
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-volumes:
-  postgres_data:

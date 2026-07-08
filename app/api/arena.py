@@ -42,10 +42,10 @@ from app.schemas.arena import (
 )
 from app.schemas.player import (
     LobbyResponse,
-    PlayerResponse,
-    PlayerScoreboardResponse,
     PlayerBankingProfileCreate,
     PlayerBankingProfileResponse,
+    PlayerResponse,
+    PlayerScoreboardResponse,
 )
 from app.schemas.user import AuthContext
 from app.services.ai_question_service import AIQuestionGenerationService
@@ -690,7 +690,10 @@ async def validate_access_code(
 
     if org_id:
         allowed, error_message = TokenService.can_add_players(
-            db=db, organization_id=org_id, additional_players=1
+            db=db,
+            organization_id=org_id,
+            additional_players=1,
+            arena_id=arena.id,
         )
         if not allowed:
             raise HTTPException(
@@ -764,7 +767,9 @@ async def validate_access_code(
     return response_payload
 
 
-@router.post("/players/{player_id}/banking", response_model=PlayerBankingProfileResponse)
+@router.post(
+    "/players/{player_id}/banking", response_model=PlayerBankingProfileResponse
+)
 async def save_player_banking_profile(
     player_id: int,
     data: PlayerBankingProfileCreate,
@@ -773,10 +778,16 @@ async def save_player_banking_profile(
     """Create or update a player's banking/payout profile."""
     player = db.query(Player).filter(Player.id == player_id).first()
     if not player:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Player not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Player not found"
+        )
 
     # Upsert banking profile
-    profile = db.query(PlayerBankingProfile).filter(PlayerBankingProfile.player_id == player_id).first()
+    profile = (
+        db.query(PlayerBankingProfile)
+        .filter(PlayerBankingProfile.player_id == player_id)
+        .first()
+    )
     if not profile:
         profile = PlayerBankingProfile(
             player_id=player_id,
@@ -1519,7 +1530,7 @@ def get_arena_scoreboard(
         scoreboard_data.append(
             {
                 "player_id": player.id,
-                "username": player.username,
+                "username": player.username or f"Player_{player.id}",
                 "total_score": total_score,
                 "answers_correct": correct_count,
                 "answers_total": total_answers,
@@ -1546,20 +1557,72 @@ def get_arena_scoreboard(
     return [PlayerScoreboardResponse.model_validate(entry) for entry in scoreboard_data]
 
 
-async def close_arena_and_build_payout_ledger(arena_id: str, db: Session):
-    players = (
-        db.query(Player)
-        .filter(Player.arena_id == arena_id, Player.status == "completed")
-        .all()
-    )
+async def close_arena_and_build_payout_ledger(arena_id: str, db: Session) -> dict:
+    players = db.query(Player).filter(Player.arena_id == arena_id).all()
 
     if not players:
-        return
+        return {
+            "scoreboard": [],
+            "completed_players": 0,
+            "completion_rate": 0.0,
+        }
 
-    # Higher scores first;
-    sorted_players = sorted(
-        players, key=lambda p: (p.score or 0, p.correct_answers or 0), reverse=True
+    ranked_players: list[dict] = []
+    now = datetime.utcnow()
+
+    for player in players:
+        answers = (
+            db.query(PlayerAnswerScore)
+            .filter(
+                PlayerAnswerScore.player_id == player.id,
+                PlayerAnswerScore.arena_id == arena_id,
+            )
+            .all()
+        )
+
+        total_score = sum(a.points_earned for a in answers)
+        answers_submitted = len(answers)
+        correct_answers = sum(1 for a in answers if a.is_correct)
+        accuracy_percentage = (
+            round((correct_answers / answers_submitted) * 100, 2)
+            if answers_submitted > 0
+            else 0.0
+        )
+
+        player.score = total_score
+        player.answers_submitted = answers_submitted
+        player.correct_answers = correct_answers
+
+        # Treat a player as completed if they participated in at least one question.
+        if answers_submitted > 0:
+            player.status = "completed"
+            if player.completed_at is None:
+                player.completed_at = now
+
+        ranked_players.append(
+            {
+                "player": player,
+                "player_id": player.id,
+                "username": player.username or f"Player_{player.id}",
+                "total_score": total_score,
+                "answers_correct": correct_answers,
+                "answers_total": answers_submitted,
+                "accuracy_percentage": accuracy_percentage,
+                "rank": None,
+            }
+        )
+
+    ranked_players.sort(
+        key=lambda entry: (
+            -(entry["total_score"] or 0),
+            -(entry["answers_correct"] or 0),
+            (entry["username"] or "").lower(),
+        )
     )
+
+    for index, entry in enumerate(ranked_players, start=1):
+        entry["rank"] = index
+        entry["player"].rank = index
 
     # 3. Define your prize pool matrix structure (Example calculation model)
     # Top 1 gets 50%, Top 2 gets 30%, Top 3 gets 20% of a $50 pool (calculated in cents)
@@ -1570,31 +1633,70 @@ async def close_arena_and_build_payout_ledger(arena_id: str, db: Session):
         3: int(prize_pool_cents * 0.20),
     }
 
-    # 4. Generate the payout records
-    for index, player in enumerate(sorted_players, start=1):
-        current_rank = index
+    existing_reports = {
+        report.player_id: report
+        for report in db.query(ArenaPayoutReport)
+        .filter(ArenaPayoutReport.arena_id == arena_id)
+        .all()
+    }
 
-        # Update operational data inside the core Player model row
-        player.rank = current_rank
+    eligible_for_payout = [
+        entry for entry in ranked_players if (entry["answers_total"] or 0) > 0
+    ]
 
-        # Determine if this rank receives cash from your prize matrix
+    # 4. Generate or update payout records for participants.
+    for entry in eligible_for_payout:
+        player = entry["player"]
+        current_rank = entry["rank"]
         payout_reward = payout_distribution.get(current_rank, 0)
 
-        # Inject structural transaction ledger entry
-        payout_entry = ArenaPayoutReport(
-            arena_id=arena_id,
-            player_id=player.id,
-            username=player.username or f"Player_{player.id}",
-            final_score=player.score or 0,
-            final_rank=current_rank,
-            payout_amount_cents=payout_reward,
-            payout_status="pending"
-            if payout_reward > 0
-            else "skipped",  # Skip processing if they won $0
-        )
-        db.add(payout_entry)
+        existing = existing_reports.get(player.id)
+        if existing:
+            existing.username = player.username or f"Player_{player.id}"
+            existing.final_score = entry["total_score"]
+            existing.final_rank = current_rank
+            existing.payout_amount_cents = payout_reward
+            existing.payout_status = "pending" if payout_reward > 0 else "skipped"
+        else:
+            payout_entry = ArenaPayoutReport(
+                arena_id=arena_id,
+                player_id=player.id,
+                username=player.username or f"Player_{player.id}",
+                final_score=entry["total_score"],
+                final_rank=current_rank,
+                payout_amount_cents=payout_reward,
+                payout_status="pending" if payout_reward > 0 else "skipped",
+            )
+            db.add(payout_entry)
+
+    total_players = len(ranked_players)
+    completed_players = sum(
+        1 for entry in ranked_players if (entry["answers_total"] or 0) > 0
+    )
+    completion_rate = (
+        round((completed_players / total_players) * 100, 2)
+        if total_players > 0
+        else 0.0
+    )
 
     db.commit()
+
+    return {
+        "scoreboard": [
+            {
+                "player_id": entry["player_id"],
+                "username": entry["username"],
+                "total_score": entry["total_score"],
+                "answers_correct": entry["answers_correct"],
+                "answers_total": entry["answers_total"],
+                "accuracy_percentage": entry["accuracy_percentage"],
+                "rank": entry["rank"],
+            }
+            for entry in ranked_players
+        ],
+        "completed_players": completed_players,
+        "completion_rate": completion_rate,
+    }
 
 
 @router.websocket("/ws/lobby/{access_code}")
@@ -1782,14 +1884,8 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
 
                 elif msg_type == "end_game" or msg_type == "game_over":
                     try:
-                        await close_arena_and_build_payout_ledger(
+                        finalization = await close_arena_and_build_payout_ledger(
                             arena_id=arena.id, db=db
-                        )
-                        final_scoreboard = (
-                            db.query(Player)
-                            .filter(Player.arena_id == arena.id)
-                            .order_by(Player.rank.asc())
-                            .all()
                         )
 
                         await ws_manager.broadcast(
@@ -1798,15 +1894,13 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                                 "type": "arena_concluded",
                                 "payload": {
                                     "message": "Game over! Financial payout ledger generated.",
-                                    "scoreboard": [
-                                        {
-                                            "username": p.username,
-                                            "score": p.score,
-                                            "rank": p.rank,
-                                            "status": "completed",
-                                        }
-                                        for p in final_scoreboard
-                                    ],
+                                    "scoreboard": finalization.get("scoreboard", []),
+                                    "completed_players": finalization.get(
+                                        "completed_players", 0
+                                    ),
+                                    "completion_rate": finalization.get(
+                                        "completion_rate", 0.0
+                                    ),
                                 },
                             },
                         )
@@ -1814,7 +1908,9 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                         try:
                             await ws_manager.close_room(str(arena.access_code))
                         except Exception:
-                            logger.exception("Error closing websockets for arena %s", arena.id)
+                            logger.exception(
+                                "Error closing websockets for arena %s", arena.id
+                            )
                     except Exception as e:
                         logger.exception(
                             f"Critical payout calculation failure on arena {arena.id}: {e}"
