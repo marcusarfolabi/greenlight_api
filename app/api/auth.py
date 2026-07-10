@@ -28,7 +28,6 @@ from app.schemas.user import (
     ResendOTPRequest,
     ResetPasswordRequest,
     UserCreate,
-    UserResponse,
     VerifyOTPRequest,
 )
 from app.services.mail_service import mail_service
@@ -278,7 +277,7 @@ async def auth_google(
         )
 
 
-@router.post("/register", response_model=UserResponse)
+@router.post("/register")
 async def register(
     user_data: UserCreate,
     background_tasks: BackgroundTasks,
@@ -301,25 +300,32 @@ async def register(
     user_display_name = user_data.first_name or new_user.username
     org_name = ""
 
-    background_tasks.add_task(
-        mail_service.send_welcome_email,
-        email=new_user.email,
-        name=user_display_name,
-        org_name=org_name,
-    )
+    try:
+        background_tasks.add_task(
+            mail_service.send_welcome_email,
+            email=new_user.email,
+            name=user_display_name,
+            org_name=org_name,
+        )
 
-    otp_code = f"{secrets.randbelow(9000) + 1000}"
-    expire = datetime.utcnow() + timedelta(minutes=15)
+        otp_code = f"{secrets.randbelow(9000) + 1000}"
+        expire = datetime.utcnow() + timedelta(minutes=15)
 
-    otp_cache.set_otp(email=new_user.email, otp=otp_code, expires_at=expire)
-    background_tasks.add_task(
-        mail_service.send_email_confirmation,
-        email=new_user.email,
-        name=user_display_name,
-        otp=otp_code,
-    )
+        otp_cache.set_otp(email=new_user.email, otp=otp_code, expires_at=expire)
+        background_tasks.add_task(
+            mail_service.send_email_confirmation,
+            email=new_user.email,
+            name=user_display_name,
+            otp=otp_code,
+        )
+    except Exception as exc:
+        # Registration is already persisted at this point; do not fail the API response.
+        logger.exception("Post-registration side effects failed for user_id=%s: %s", new_user.id, exc)
 
-    return new_user
+    return {
+        "detail": "Verification code sent to your email!",
+        "user_id": new_user.id,
+    }
 
 
 @router.post("/resend-otp")

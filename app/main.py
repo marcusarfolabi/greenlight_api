@@ -1,6 +1,5 @@
 import os
 import logging
-from sqlalchemy import text
 from dotenv import load_dotenv
 from app.api import api_router
 from app.db.session import engine
@@ -23,6 +22,20 @@ logger = logging.getLogger(__name__)
 
 security = HTTPBasic()
 
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://greenlightquiz.com",
+]
+
+
+def build_cors_origins() -> list[str]:
+    configured = [origin.strip() for origin in settings.CORS_ORIGINS if origin and origin.strip()]
+    merged = set(DEFAULT_CORS_ORIGINS)
+    merged.update(configured)
+    merged.discard("*")
+    return sorted(merged)
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Host the live arena for gamers, streamers, and esports enthusiasts. Watch live streams, join tournaments, and connect with the gaming community.",
@@ -30,26 +43,20 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
-
     redirect_slashes=False,
-    swagger_ui_parameters={
-        "tryItOutEnabled": True,
-        "persistAuthorization": True
-    }
+    swagger_ui_parameters={"tryItOutEnabled": True, "persistAuthorization": True},
 )
+
 
 @app.on_event("startup")
 async def startup_event():
     logger.info("Initializing database and running seeders...")
     try:
-        # 🚨 FORCE WIPE: Disable constraint checks, drop everything, re-enable checks
         # with engine.begin() as connection:
-        #     # Grab all table names registered in your SQLAlchemy Base models
         #     table_names = ", ".join([f'"{table.name}"' for table in Base.metadata.sorted_tables])
 
         #     if table_names:
         #         logger.info(f"Force dropping tables: {table_names}")
-        #         # CASCADE forces Postgres to drop tables regardless of circular foreign keys
         #         connection.execute(text(f"DROP TABLE IF EXISTS {table_names} CASCADE;"))
         #         logger.info("Database cleanly wiped via raw CASCADE.")
         #     else:
@@ -59,7 +66,7 @@ async def startup_event():
         Base.metadata.create_all(bind=engine)
         seed_superadmin()
         seed_subscription_plans()
-        logger.info("Database forcefully wiped, recreated, and seeded fresh!")
+        # logger.info("Database forcefully wiped, recreated, and seeded fresh!")
     except OperationalError as e:
         logger.error(
             f"Database connection failed on startup. {e} "
@@ -88,7 +95,10 @@ def get_admin_user(credentials: HTTPBasicCredentials = Depends(security)):
             detail="Internal server error",
         )
 
-    if credentials.username != correct_username or credentials.password != correct_password:
+    if (
+        credentials.username != correct_username
+        or credentials.password != correct_password
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized access",
@@ -98,23 +108,16 @@ def get_admin_user(credentials: HTTPBasicCredentials = Depends(security)):
 
 
 @app.get("/docs", include_in_schema=False)
-async def get_swagger_documentation(
-    username: str = Depends(get_admin_user)
-):
+async def get_swagger_documentation(username: str = Depends(get_admin_user)):
     return get_swagger_ui_html(
         openapi_url="/openapi.json",
         title="Green Light Quiz API",
-        swagger_ui_parameters={
-            "tryItOutEnabled": True,
-            "persistAuthorization": True
-        }
+        swagger_ui_parameters={"tryItOutEnabled": True, "persistAuthorization": True},
     )
 
 
 @app.get("/openapi.json", include_in_schema=False)
-async def get_open_api_endpoint(
-    username: str = Depends(get_admin_user)
-):
+async def get_open_api_endpoint(username: str = Depends(get_admin_user)):
     return get_openapi(
         title=app.title,
         version=app.version,
@@ -122,29 +125,34 @@ async def get_open_api_endpoint(
         routes=app.routes,
     )
 
+
 app.add_middleware(
     CORSMiddleware,
-    # allow_origins=settings.CORS_ORIGINS,
-    allow_origins=["http://localhost:3000", "https://greenlightquiz.com"],
+    allow_origins=build_cors_origins(),
+    # Allow root domain and optional subdomains (e.g. app/preview hosts).
+    allow_origin_regex=r"^https://([a-z0-9-]+\.)?greenlightquiz\.com$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+logger.info("CORS explicit origins: %s", build_cors_origins())
+
 app.include_router(api_router, prefix="/v1")
+
 
 @app.get("/")
 async def root():
     try:
-        with engine.connect() :
+        with engine.connect():
             return {
                 "status": "Greenlight is operational",
                 "environment": os.getenv("ENVIRONMENT"),
-                "db_status": "connected"
+                "db_status": "connected",
             }
     except Exception as e:
         return {
             "status": "Greenlight is operational",
             "environment": os.getenv("ENVIRONMENT"),
-            "db_status": f"connection failed: {str(e)}"
+            "db_status": f"connection failed: {str(e)}",
         }
