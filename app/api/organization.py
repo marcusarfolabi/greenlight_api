@@ -220,10 +220,11 @@ async def create_wallet_topup(
             stripe_customer_id = customer.id
 
         amount = int(request.amount * 100)
+        wallet = OrganizationService.get_or_create_wallet(db, organization.id)
 
         payment_intent = stripe.PaymentIntent.create(
             amount=amount,
-            currency=organization.wallet.currency if organization.wallet else "usd",
+            currency=wallet.currency,
             customer=stripe_customer_id,
             automatic_payment_methods={"enabled": True},
             metadata={

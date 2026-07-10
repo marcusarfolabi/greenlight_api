@@ -11,6 +11,7 @@ from app.models.organization import Organization
 from app.models.subscription import Subscription, SubscriptionPlan
 from app.models.wallet import Transaction, TransactionType, Wallet
 from app.services.mail_service import mail_service
+from app.services.organization import OrganizationService
 
 logger = logging.getLogger(__name__)
 
@@ -102,9 +103,7 @@ class SubscriptionService:
             current_period_end=period_end,
         )
 
-        wallet = (
-            db.query(Wallet).filter(Wallet.organization_id == organization_id).first()
-        )
+        wallet = OrganizationService.get_or_create_wallet(db, organization_id)
 
         transaction = Transaction(
             wallet_id=wallet.id if wallet else None,
@@ -133,7 +132,7 @@ class SubscriptionService:
                         "plan_name": plan.name,
                         "plan_description": plan.description,
                         "plan_price": f"{plan.price:.2f}",
-                        "currency": plan.currency.upper(),
+                        "currency": wallet.currency.upper(),
                         "interval": plan.interval,
                         "ai_tokens": plan.ai_tokens,
                         "max_players": plan.max_players,

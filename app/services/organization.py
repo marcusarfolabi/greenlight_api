@@ -9,6 +9,7 @@ from app.models.wallet import Wallet
 from app.schemas.organization import OrganizationCreate, OrgSettingsResponse
 from app.services.stripe_connect import StripeConnectService
 from app.models.user import User
+from app.utils.currency import get_currency_by_country_code
 
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,10 @@ class OrganizationService:
                 wallet = db.query(Wallet).filter(Wallet.user_id == user.id).first()
                 
                 if not wallet:
-                    wallet = Wallet(user_id=user.id, currency=getattr(user, "currency_iso", "gbp"))
+                    wallet = Wallet(
+                        user_id=user.id,
+                        currency=get_currency_by_country_code(user.location),
+                    )
                     db.add(wallet)
 
             wallet.organization_id = db_org.id 
@@ -100,11 +104,28 @@ class OrganizationService:
         if wallet:
             return wallet
 
-        wallet = Wallet(organization_id=organization_id)
+        organization = db.query(Organization).filter(Organization.id == organization_id).first()
+        currency = OrganizationService.resolve_organization_currency(db, organization)
+        wallet = Wallet(organization_id=organization_id, currency=currency)
         db.add(wallet)
         db.commit()
         db.refresh(wallet)
         return wallet
+
+    @staticmethod
+    def resolve_organization_currency(db: Session, org: Organization | None) -> str:
+        """Resolve the best currency for an organization with a safe fallback."""
+        if not org:
+            return "gbp"
+
+        if org.wallet and org.wallet.currency:
+            return org.wallet.currency.lower()
+
+        owner = db.query(User).filter(User.id == org.owner_id).first()
+        if owner and owner.wallet and owner.wallet.currency:
+            return owner.wallet.currency.lower()
+
+        return get_currency_by_country_code(org.country)
 
     @staticmethod
     def get_wallet_summary(db: Session, org: Organization) -> dict:

@@ -22,6 +22,7 @@ from app.schemas.subscription import (
 from app.schemas.user import AuthContext
 from app.services.subscription_service import SubscriptionService
 from app.services.user_service import UserService
+from app.services.organization import OrganizationService
 
 
 router = APIRouter()
@@ -234,10 +235,11 @@ async def create_payment_intent(
             stripe_customer_id = customer.id
 
         amount = int(plan.price * 100)
+        currency = OrganizationService.resolve_organization_currency(db, organization)
 
         payment_intent = stripe.PaymentIntent.create(
             amount=amount,
-            currency=plan.currency,
+            currency=currency,
             customer=stripe_customer_id,
             automatic_payment_methods={"enabled": True},
             metadata={

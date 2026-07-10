@@ -5,16 +5,15 @@ import logging
 # Setup path before imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-# Load environment variables BEFORE importing app modules
-from dotenv import load_dotenv
-load_dotenv(dotenv_path=".env.docker")
-load_dotenv(dotenv_path=".env")
-
 import stripe # type: ignore
 
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.subscription import SubscriptionPlan, SubscriptionPlanType
+
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=".env.docker")
+load_dotenv(dotenv_path=".env")
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +110,7 @@ def seed_subscription_plans():
 
             if plan_config["price"] > 0:
                 if not stripe_key:
-                    print(f"   ⚠️  Skipping Stripe creation (key not configured)")
+                    print(" ⚠️ Skipping Stripe creation (key not configured)")
                 else:
                     print(f"   🔗 Creating Stripe product for {plan_name}...")
                     try:
@@ -147,7 +146,7 @@ def seed_subscription_plans():
                         print(f"   ❌ Stripe error: {str(e)}")
                         # Continue without Stripe IDs rather than failing
             else:
-                print(f"   ℹ️  Skipping Stripe creation for Free plan")
+                print("   ℹ️  Skipping Stripe creation for Free plan")
 
             # Create database record
             print(f"   💾 Creating database record for {plan_name}...")
