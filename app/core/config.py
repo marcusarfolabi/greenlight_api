@@ -1,10 +1,12 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List, Optional
 from pathlib import Path
+from typing import List, Optional
+
 from fastapi_mail import ConnectionConfig
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-TEMPLATE_FOLDER = Path(__file__).parent.parent / 'templates'
+TEMPLATE_FOLDER = Path(__file__).parent.parent / "templates"
+
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Green Light Quiz API"
@@ -41,8 +43,6 @@ class Settings(BaseSettings):
     STRIPE_CONNECT_RETURN_URL: str = ""
     STRIPE_CONNECT_REFRESH_URL: str = ""
 
-    RECAPTCHA_SECRET_KEY: str = ""
-
     GEMINI_API_KEY: str = ""
 
     # Twilio configuration
@@ -51,10 +51,9 @@ class Settings(BaseSettings):
     TWILIO_FROM_NUMBER: str = ""
 
     model_config = SettingsConfigDict(
-        env_file=(".env.docker"),
-        env_file_encoding="utf-8",
-        extra="ignore"
+        env_file=(".env.docker"), env_file_encoding="utf-8", extra="ignore"
     )
+
 
 settings = Settings()
 

@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, model_validator
 from app.models.user import UserRole
 from app.schemas.organization import OrganizationCreate, OrganizationResponse
 
+
 class AuthContext(BaseModel):
     token: str
     user_id: int
@@ -13,8 +14,10 @@ class AuthContext(BaseModel):
     role: str
     username: str
 
+
 class ResendOTPRequest(BaseModel):
     email: EmailStr
+
 
 class VerifyOTPRequest(BaseModel):
     email: EmailStr
@@ -24,19 +27,24 @@ class VerifyOTPRequest(BaseModel):
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
+
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
 
+
 class TokenRefreshRequest(BaseModel):
     refresh_token: str
+
 
 class GoogleTokenPayload(BaseModel):
     token: str
 
+
 class UserBase(BaseModel):
     username: str
     email: EmailStr
+
 
 class UserCreate(UserBase):
     password: str
@@ -49,7 +57,15 @@ class UserCreate(UserBase):
     google_id: Optional[str] = None
     location: Optional[str] = None
     country_iso: Optional[str] = None
-    recaptcha_token: Optional[str] = None
+    accepted_terms: bool = False
+
+    @model_validator(mode="after")
+    def validate_terms_acceptance(self) -> "UserCreate":
+        if not self.accepted_terms:
+            raise ValueError("Terms and Privacy Policy acceptance is required")
+        return self
+
+
 class UserOrgCreate(BaseModel):
     user: UserCreate
     organization: OrganizationCreate
@@ -59,7 +75,6 @@ class UserOrgCreate(BaseModel):
         if self.user.role == UserRole.HOST and self.organization is None:
             raise ValueError("Organization data is required when role is HOST")
         return self
-
 
 
 class UserUpdate(BaseModel):
@@ -92,8 +107,9 @@ class UserResponse(UserBase):
     linkedin_id: Optional[str] = None
     apple_id: Optional[str] = None
 
+
 class Token(BaseModel):
-    model_config = ConfigDict(from_attributes=True) # Pydantic V2
+    model_config = ConfigDict(from_attributes=True)  # Pydantic V2
 
     access_token: str
     token_type: str
@@ -103,6 +119,7 @@ class Token(BaseModel):
     id: int
     is_active: bool
     created_at: datetime
+
 
 class PushSubscriptionCreate(BaseModel):
     fcm_token: str
