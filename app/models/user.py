@@ -89,19 +89,15 @@ class PayoutProfile(Base):
 
     user: Mapped["User"] = relationship(back_populates="payout_profile")
 
+
 class PushSubscription(Base):
     __tablename__ = "push_subscriptions"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    
-    endpoint: Mapped[Optional[str]] = mapped_column(
-        String(255), unique=True, nullable=True
-    )
     fcm_token: Mapped[Optional[str]] = mapped_column(
         String(255), unique=True, nullable=True
     )
     device_type: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    keys: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     device_meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
 

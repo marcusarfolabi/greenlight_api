@@ -17,7 +17,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
 
     GOOGLE_CLIENT_ID: str = ""
-    GOOGLE_CLIENT_SECRET: Optional[str] = None
+    APPLE_CLIENT_ID: str = ""
+    LINKEDIN_CLIENT_ID: str = ""
+    LINKEDIN_CLIENT_SECRET: str = ""
+    LINKEDIN_REDIRECT_URI: str = ""
     ENVIRONMENT: str = "development"
 
     CORS_ORIGINS: List[str] = ["*"]

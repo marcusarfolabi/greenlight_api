@@ -7,7 +7,6 @@ from sqlalchemy.orm import joinedload
 from app.models.organization import Organization
 from app.models.wallet import Wallet
 from app.schemas.organization import OrganizationCreate, OrgSettingsResponse
-from app.services.stripe_connect import StripeConnectService
 from app.models.user import User
 from app.utils.currency import get_currency_by_country_code
 
@@ -30,7 +29,7 @@ class OrganizationService:
     def build_settings_response(org: Organization) -> OrgSettingsResponse:
         return OrgSettingsResponse.model_validate(org).model_copy(update={"owner_id": org.owner_id, "is_verified": org.is_verified})
 
-    
+
     @staticmethod
     def create_organization_for_user(db: Session, user_id: int, org_data: OrganizationCreate) -> Organization:
         """
@@ -60,7 +59,7 @@ class OrganizationService:
             wallet = user.wallet
             if wallet is None:
                 wallet = db.query(Wallet).filter(Wallet.user_id == user.id).first()
-                
+
                 if not wallet:
                     wallet = Wallet(
                         user_id=user.id,
@@ -68,17 +67,17 @@ class OrganizationService:
                     )
                     db.add(wallet)
 
-            wallet.organization_id = db_org.id 
+            wallet.organization_id = db_org.id
             db.commit()
-            
+
             user.organization_id = db_org.id
             user.first_name = org_data.first_name
             user.last_name = org_data.last_name
             user.phone_number = org_data.phone_number
             user.role = org_data.role
-            
+
             db.commit()
-            
+
             db.refresh(db_org)
             db.refresh(user)
 

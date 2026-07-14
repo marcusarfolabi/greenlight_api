@@ -35,6 +35,14 @@ class UserService:
         return db.query(User).filter(User.google_id == google_id).first()
 
     @staticmethod
+    def get_user_by_linkedin_id(db: Session, linkedin_id: str) -> Optional[User]:
+        return db.query(User).filter(User.linkedin_id == linkedin_id).first()
+
+    @staticmethod
+    def get_user_by_apple_id(db: Session, apple_id: str) -> Optional[User]:
+        return db.query(User).filter(User.apple_id == apple_id).first()
+
+    @staticmethod
     def get_user_by_login(db: Session, login: str) -> Optional[User]:
         return (
             db.query(User)

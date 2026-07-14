@@ -39,6 +39,23 @@ class TokenRefreshRequest(BaseModel):
 
 class GoogleTokenPayload(BaseModel):
     token: str
+    role: Optional[UserRole] = None
+    location: Optional[str] = None
+    country_iso: Optional[str] = None
+
+
+class AppleTokenPayload(BaseModel):
+    token: str
+    role: Optional[UserRole] = None
+    location: Optional[str] = None
+    country_iso: Optional[str] = None
+
+
+class LinkedInTokenPayload(BaseModel):
+    code: str
+    role: Optional[UserRole] = None
+    location: Optional[str] = None
+    country_iso: Optional[str] = None
 
 
 class UserBase(BaseModel):
@@ -55,6 +72,8 @@ class UserCreate(UserBase):
     organization_id: Optional[str] = None
     is_active: Optional[bool] = False
     google_id: Optional[str] = None
+    linkedin_id: Optional[str] = None
+    apple_id: Optional[str] = None
     location: Optional[str] = None
     country_iso: Optional[str] = None
     accepted_terms: bool = False

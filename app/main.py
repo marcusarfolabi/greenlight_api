@@ -6,6 +6,7 @@ from app.db.session import engine
 from app.models import Base
 from app.core.config import settings
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.sql import text
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
