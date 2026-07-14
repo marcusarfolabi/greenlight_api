@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
@@ -29,6 +30,17 @@ class OrganizationService:
     def build_settings_response(org: Organization) -> OrgSettingsResponse:
         return OrgSettingsResponse.model_validate(org).model_copy(update={"owner_id": org.owner_id, "is_verified": org.is_verified})
 
+    @staticmethod
+    def extract_location_parts(location: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        if not location:
+            return None, None, None
+
+        parts = [part.strip() for part in location.split(",") if part.strip()]
+        if len(parts) >= 3:
+            return parts[0], parts[1], parts[-1]
+        if len(parts) == 2:
+            return parts[0], None, parts[1]
+        return None, None, parts[0]
 
     @staticmethod
     def create_organization_for_user(db: Session, user_id: int, org_data: OrganizationCreate) -> Organization:
@@ -43,13 +55,14 @@ class OrganizationService:
                     detail="User not found while creating organization."
                 )
 
+            parsed_city, parsed_state, parsed_country = OrganizationService.extract_location_parts(user.location or "")
             db_org = Organization(
                 name=org_data.name,
                 subdomain=org_data.subdomain,
                 industry=org_data.industry,
-                city=org_data.city,
-                state=org_data.state,
-                country=org_data.country,
+                city=org_data.city or parsed_city,
+                state=org_data.state or parsed_state,
+                country=org_data.country or parsed_country,
                 owner_id=user_id,
             )
 

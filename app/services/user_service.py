@@ -87,7 +87,7 @@ class UserService:
             linkedin_id=linkedin_id,
             apple_id=apple_id,
             email_verified_at=email_verified_at,
-            location=getattr(user_data, "location", None) or incoming_country
+            location=getattr(user_data, "location", None),
         )
         # if organization_id is provided, we should link the user to that organization
         if getattr(user_data, "organization_id", None):

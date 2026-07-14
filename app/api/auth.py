@@ -456,31 +456,61 @@ async def auth_linkedin(
             detail="LinkedIn token exchange failed.",
         )
 
-    profile_response = requests.get(
-        "https://api.linkedin.com/v2/me",
-        headers={"Authorization": f"Bearer {access_token}"},
-        params={"projection": "(id,localizedFirstName,localizedLastName)"},
-        timeout=10,
-    )
-    profile_response.raise_for_status()
-    profile_data = profile_response.json()
+    profile_data = {}
 
-    email_response = requests.get(
-        "https://api.linkedin.com/v2/emailAddress",
-        headers={"Authorization": f"Bearer {access_token}"},
-        params={
-            "q": "members",
-            "projection": "(elements*(handle~))",
-        },
-        timeout=10,
-    )
-    email_response.raise_for_status()
-    email_data = email_response.json()
+    try:
+        userinfo_response = requests.get(
+            "https://api.linkedin.com/v2/userinfo",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/json",
+            },
+            timeout=10,
+        )
+        userinfo_response.raise_for_status()
+        profile_data = userinfo_response.json()
+    except requests.HTTPError as exc:
+        logger.warning("LinkedIn OpenID userinfo lookup failed: %s", exc)
+    except ValueError:
+        logger.warning("LinkedIn OpenID userinfo returned invalid JSON")
 
-    email = email_data.get("elements", [{}])[0].get("handle~", {}).get("emailAddress")
-    linkedin_id = profile_data.get("id")
-    first_name = profile_data.get("localizedFirstName")
-    last_name = profile_data.get("localizedLastName")
+    if not profile_data:
+        try:
+            profile_response = requests.get(
+                "https://api.linkedin.com/v2/me",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"projection": "(id,localizedFirstName,localizedLastName)"},
+                timeout=10,
+            )
+            profile_response.raise_for_status()
+            profile_data = profile_response.json()
+
+            email_response = requests.get(
+                "https://api.linkedin.com/v2/emailAddress",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={
+                    "q": "members",
+                    "projection": "(elements*(handle~))",
+                },
+                timeout=10,
+            )
+            email_response.raise_for_status()
+            email_data = email_response.json()
+            email = email_data.get("elements", [{}])[0].get("handle~", {}).get("emailAddress")
+            linkedin_id = profile_data.get("id")
+            first_name = profile_data.get("localizedFirstName")
+            last_name = profile_data.get("localizedLastName")
+        except requests.HTTPError as exc:
+            logger.warning("LinkedIn legacy profile lookup failed: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="LinkedIn profile lookup failed.",
+            ) from exc
+    else:
+        email = profile_data.get("email")
+        linkedin_id = profile_data.get("sub")
+        first_name = profile_data.get("given_name") or profile_data.get("name")
+        last_name = profile_data.get("family_name")
 
     if not email or not linkedin_id:
         raise HTTPException(
