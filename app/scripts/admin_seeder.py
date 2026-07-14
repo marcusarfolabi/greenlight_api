@@ -1,6 +1,8 @@
 import os
 import sys
 
+from sqlalchemy import func
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.core.config import settings
@@ -47,7 +49,8 @@ def seed_superadmin():
             last_name=admin_lastname,
             hashed_password=hashed_password,
             role=UserRole.SUPERADMIN.value,
-            is_active=True
+            is_active=True,
+            email_verified_at=func.now(),
         )
 
         session.add(admin_user)
