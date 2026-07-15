@@ -83,6 +83,7 @@ class PlayerBankingProfileCreate(BaseModel):
     account_number: Optional[str] = None
     bank_code: Optional[str] = None
     payout_method: Optional[str] = "bank_transfer"
+    create_account: bool = False
 
 
 class PlayerBankingProfileResponse(PlayerBankingProfileCreate):

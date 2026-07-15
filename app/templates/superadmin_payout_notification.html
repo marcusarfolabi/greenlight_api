@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Payout Details Ready</title>
+  </head>
+  <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background: #f6f7fb; color: #111827;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background: #f6f7fb; padding: 24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="max-width: 640px; width: 100%; background: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e5e7eb;">
+            <tr>
+              <td style="padding: 24px; background: #0f172a; color: #ffffff;">
+                <h1 style="margin: 0; font-size: 22px; line-height: 1.25;">Payout Details Ready</h1>
+                <p style="margin: 8px 0 0; opacity: 0.9; font-size: 14px;">Arena payout records are ready for processing.</p>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding: 20px 24px 8px;">
+                <p style="margin: 0 0 12px; font-size: 14px;">Hi {{ admin_name }},</p>
+                <p style="margin: 0 0 8px; font-size: 14px;">A game has concluded and includes payout entries that are pending action.</p>
+                <p style="margin: 0; font-size: 14px;"><strong>Arena:</strong> {{ arena_name }}</p>
+                <p style="margin: 6px 0 0; font-size: 14px;"><strong>Arena ID:</strong> {{ arena_id }}</p>
+                <p style="margin: 6px 0 0; font-size: 14px;"><strong>Access Code:</strong> {{ access_code }}</p>
+                <p style="margin: 6px 0 0; font-size: 14px;"><strong>Payout Entries:</strong> {{ payout_count }}</p>
+                <p style="margin: 6px 0 0; font-size: 14px;"><strong>Total Pending Payout:</strong> {{ total_payout }}</p>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding: 14px 24px 8px;">
+                <h2 style="margin: 0 0 10px; font-size: 16px;">Payout Details</h2>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid #e5e7eb; font-size: 13px;">
+                  <thead>
+                    <tr style="background: #f3f4f6;">
+                      <th align="left" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Rank</th>
+                      <th align="left" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Player</th>
+                      <th align="left" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Payout</th>
+                      <th align="left" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Account Holder</th>
+                      <th align="left" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Email</th>
+                      <th align="left" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Account</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for row in payout_rows %}
+                    <tr>
+                      <td style="padding: 8px; border-bottom: 1px solid #f3f4f6;">{{ row.rank }}</td>
+                      <td style="padding: 8px; border-bottom: 1px solid #f3f4f6;">{{ row.username }}</td>
+                      <td style="padding: 8px; border-bottom: 1px solid #f3f4f6;">{{ row.payout_amount }}</td>
+                      <td style="padding: 8px; border-bottom: 1px solid #f3f4f6;">{{ row.account_holder_name }}</td>
+                      <td style="padding: 8px; border-bottom: 1px solid #f3f4f6;">{{ row.email }}</td>
+                      <td style="padding: 8px; border-bottom: 1px solid #f3f4f6;">{{ row.masked_account_number }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding: 20px 24px 28px;">
+                <a href="{{ admin_login_url }}" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; font-weight: 700; padding: 10px 16px; border-radius: 8px;">
+                  Go To Admin Login
+                </a>
+                <p style="margin: 10px 0 0; font-size: 12px; color: #6b7280;">Direct URL: {{ admin_login_url }}</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

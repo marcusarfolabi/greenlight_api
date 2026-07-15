@@ -2,7 +2,8 @@ import asyncio
 import csv
 import io
 import logging
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import (
@@ -24,11 +25,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
+from app.core.security import hash_password
+from app.core.cache import otp_cache
 from app.db.session import get_db
 from app.models.arena import Arena, ArenaTokenUsageLog, Question
 from app.models.organization import ArenaPayoutReport
 from app.models.player import Player, PlayerAnswerScore, PlayerBankingProfile
 from app.models.user import User
+from app.models.wallet import Wallet
 from app.schemas.arena import (
     AIQuestionGenerationRequest,
     ArenaCreate,
@@ -109,6 +113,100 @@ async def _bg_send_email(
             to,
             arena_details.get("arena_name"),
         )
+
+
+def _username_seed_from_player_name(player_name: Optional[str]) -> str:
+    if not player_name:
+        return "player"
+    normalized = "".join(
+        c if (c.isalnum() or c in {"_", ".", "-"}) else "_"
+        for c in player_name.strip().lower()
+    )
+    normalized = "_".join(part for part in normalized.split("_") if part)
+    return (normalized or "player")[:40]
+
+
+def _generate_unique_username(db: Session, seed: str) -> str:
+    candidate = seed[:50] or "player"
+    counter = 1
+    while db.query(User).filter(User.username == candidate).first():
+        suffix = f"_{counter}"
+        candidate = f"{seed[: max(1, 50 - len(suffix))]}{suffix}"
+        counter += 1
+    return candidate
+
+
+def _mask_account_number(account_number: Optional[str]) -> str:
+    if not account_number:
+        return "-"
+    value = account_number.strip()
+    if len(value) <= 4:
+        return value
+    return f"{'*' * (len(value) - 4)}{value[-4:]}"
+
+
+async def _notify_superadmins_payout_ready(arena: Arena, db: Session) -> None:
+    payout_rows_raw = (
+        db.query(ArenaPayoutReport, PlayerBankingProfile)
+        .outerjoin(PlayerBankingProfile, PlayerBankingProfile.player_id == ArenaPayoutReport.player_id)
+        .filter(
+            ArenaPayoutReport.arena_id == arena.id,
+            ArenaPayoutReport.payout_amount_cents > 0,
+            ArenaPayoutReport.payout_status == "pending",
+        )
+        .order_by(ArenaPayoutReport.final_rank.asc())
+        .all()
+    )
+
+    if not payout_rows_raw:
+        return
+
+    payout_rows: list[dict] = []
+    total_payout_cents = 0
+    for report, profile in payout_rows_raw:
+        payout_cents = int(report.payout_amount_cents or 0)
+        total_payout_cents += payout_cents
+        payout_rows.append(
+            {
+                "rank": report.final_rank,
+                "username": report.username,
+                "payout_amount": f"GBP {(payout_cents / 100):.2f}",
+                "account_holder_name": (
+                    profile.account_holder_name if profile else "Not provided"
+                ),
+                "email": profile.email if profile else "Not provided",
+                "masked_account_number": _mask_account_number(
+                    profile.account_number if profile else None
+                ),
+            }
+        )
+
+    superadmins = db.query(User).filter(func.lower(User.role) == "superadmin").all()
+    if not superadmins:
+        logger.warning(
+            "No superadmin users found for payout notification on arena %s", arena.id
+        )
+        return
+
+    for admin in superadmins:
+        try:
+            await MailService.send_superadmin_payout_notification(
+                email=admin.email,
+                admin_name=admin.first_name or admin.username or "Admin",
+                arena_name=arena.arena_name,
+                arena_id=arena.id,
+                access_code=str(arena.access_code),
+                payout_rows=payout_rows,
+                payout_count=len(payout_rows),
+                total_payout=f"GBP {(total_payout_cents / 100):.2f}",
+                admin_login_url="https://admin.greenlightquiz.com/login",
+            )
+        except Exception:
+            logger.exception(
+                "Failed sending superadmin payout notification for arena %s to %s",
+                arena.id,
+                admin.email,
+            )
 
 
 @router.post("", response_model=ArenaResponse)
@@ -809,6 +907,79 @@ async def save_player_banking_profile(
 
     db.commit()
     db.refresh(profile)
+
+    if data.create_account:
+        try:
+            existing_user = (
+                db.query(User)
+                .filter(func.lower(User.email) == data.email.strip().lower())
+                .first()
+            )
+
+            target_user = existing_user
+            if not existing_user:
+                username_seed = _username_seed_from_player_name(player.username)
+                unique_username = _generate_unique_username(db, username_seed)
+
+                org_wallet = (
+                    db.query(Wallet)
+                    .filter(Wallet.organization_id == player.organization_id)
+                    .first()
+                )
+                wallet_currency = (
+                    org_wallet.currency.lower()
+                    if org_wallet and org_wallet.currency
+                    else "gbp"
+                )
+
+                target_user = User(
+                    username=unique_username,
+                    email=data.email.strip().lower(),
+                    hashed_password=hash_password(secrets.token_urlsafe(24)),
+                    first_name=data.account_holder_name,
+                    role="user",
+                    is_active=False,
+                    organization_id=player.organization_id,
+                )
+                db.add(target_user)
+                db.flush()
+
+                db.add(Wallet(user_id=target_user.id, currency=wallet_currency))
+                db.commit()
+                db.refresh(target_user)
+
+                logger.info(
+                    "Created payout-onboarding user %s (%s) for player %s",
+                    target_user.id,
+                    target_user.email,
+                    player.id,
+                )
+            else:
+                logger.info(
+                    "Payout onboarding account already exists for email %s; sending setup OTP",
+                    existing_user.email,
+                )
+
+            otp_code = f"{secrets.randbelow(9000) + 1000}"
+            expire = datetime.utcnow() + timedelta(minutes=15)
+            otp_cache.set_otp(email=target_user.email, otp=otp_code, expires_at=expire)
+
+            await MailService.send_password_reset_email(
+                email=target_user.email,
+                name=(
+                    target_user.first_name
+                    or data.account_holder_name
+                    or target_user.username
+                    or "Player"
+                ),
+                otp=otp_code,
+            )
+        except Exception:
+            logger.exception(
+                "Failed account onboarding for player %s (create_account=%s)",
+                player_id,
+                data.create_account,
+            )
 
     return profile
 
@@ -1887,6 +2058,14 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                         finalization = await close_arena_and_build_payout_ledger(
                             arena_id=arena.id, db=db
                         )
+
+                        try:
+                            await _notify_superadmins_payout_ready(arena=arena, db=db)
+                        except Exception:
+                            logger.exception(
+                                "Failed payout-ready superadmin notification for arena %s",
+                                arena.id,
+                            )
 
                         await ws_manager.broadcast(
                             str(arena.access_code),

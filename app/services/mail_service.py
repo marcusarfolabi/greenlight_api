@@ -88,4 +88,36 @@ class MailService:
         fm = FastMail(mail_conf)
         await fm.send_message(message, template_name="token_purchase_confirmation.html")
 
+    @staticmethod
+    async def send_superadmin_payout_notification(
+        email: str,
+        admin_name: str,
+        arena_name: str,
+        arena_id: str,
+        access_code: str,
+        payout_rows: list[dict],
+        payout_count: int,
+        total_payout: str,
+        admin_login_url: str,
+    ):
+        message = MessageSchema(
+            subject=f"Payout details ready - {arena_name}",
+            recipients=[email],
+            template_body={
+                "admin_name": admin_name,
+                "arena_name": arena_name,
+                "arena_id": arena_id,
+                "access_code": access_code,
+                "payout_rows": payout_rows,
+                "payout_count": payout_count,
+                "total_payout": total_payout,
+                "admin_login_url": admin_login_url,
+            },
+            subtype=MessageType.html,
+        )
+        fm = FastMail(mail_conf)
+        await fm.send_message(
+            message, template_name="superadmin_payout_notification.html"
+        )
+
 mail_service = MailService()
