@@ -79,6 +79,7 @@ class PlayerScoreboardResponse(BaseModel):
 class PlayerBankingProfileCreate(BaseModel):
     account_holder_name: str
     email: str
+    phone_number: Optional[str] = None
     routing_number: Optional[str] = None
     account_number: Optional[str] = None
     bank_code: Optional[str] = None

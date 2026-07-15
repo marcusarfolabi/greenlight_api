@@ -31,7 +31,7 @@ from app.db.session import get_db
 from app.models.arena import Arena, ArenaTokenUsageLog, Question
 from app.models.organization import ArenaPayoutReport
 from app.models.player import Player, PlayerAnswerScore, PlayerBankingProfile
-from app.models.user import User
+from app.models.user import PayoutProfile, User
 from app.models.wallet import Wallet
 from app.schemas.arena import (
     AIQuestionGenerationRequest,
@@ -175,6 +175,12 @@ async def _notify_superadmins_payout_ready(arena: Arena, db: Session) -> None:
                     profile.account_holder_name if profile else "Not provided"
                 ),
                 "email": profile.email if profile else "Not provided",
+                "phone_number": (
+                    profile.phone_number if profile and profile.phone_number else "Not provided"
+                ),
+                "bank_name_or_code": (
+                    profile.bank_code if profile and profile.bank_code else "Not provided"
+                ),
                 "masked_account_number": _mask_account_number(
                     profile.account_number if profile else None
                 ),
@@ -880,6 +886,8 @@ async def save_player_banking_profile(
             status_code=status.HTTP_404_NOT_FOUND, detail="Player not found"
         )
 
+    normalized_email = data.email.strip().lower()
+
     # Upsert banking profile
     profile = (
         db.query(PlayerBankingProfile)
@@ -890,7 +898,8 @@ async def save_player_banking_profile(
         profile = PlayerBankingProfile(
             player_id=player_id,
             account_holder_name=data.account_holder_name,
-            email=data.email,
+            email=normalized_email,
+            phone_number=data.phone_number,
             routing_number=data.routing_number,
             account_number=data.account_number,
             bank_code=data.bank_code,
@@ -899,7 +908,8 @@ async def save_player_banking_profile(
         db.add(profile)
     else:
         profile.account_holder_name = data.account_holder_name
-        profile.email = data.email
+        profile.email = normalized_email
+        profile.phone_number = data.phone_number
         profile.routing_number = data.routing_number
         profile.account_number = data.account_number
         profile.bank_code = data.bank_code
@@ -908,15 +918,16 @@ async def save_player_banking_profile(
     db.commit()
     db.refresh(profile)
 
+    existing_user = (
+        db.query(User)
+        .filter(func.lower(User.email) == normalized_email)
+        .first()
+    )
+
+    target_user = existing_user
+
     if data.create_account:
         try:
-            existing_user = (
-                db.query(User)
-                .filter(func.lower(User.email) == data.email.strip().lower())
-                .first()
-            )
-
-            target_user = existing_user
             if not existing_user:
                 username_seed = _username_seed_from_player_name(player.username)
                 unique_username = _generate_unique_username(db, username_seed)
@@ -934,9 +945,10 @@ async def save_player_banking_profile(
 
                 target_user = User(
                     username=unique_username,
-                    email=data.email.strip().lower(),
+                    email=normalized_email,
                     hashed_password=hash_password(secrets.token_urlsafe(24)),
                     first_name=data.account_holder_name,
+                    phone_number=data.phone_number,
                     role="user",
                     is_active=False,
                     organization_id=player.organization_id,
@@ -955,6 +967,10 @@ async def save_player_banking_profile(
                     player.id,
                 )
             else:
+                existing_user.phone_number = data.phone_number or existing_user.phone_number
+                db.add(existing_user)
+                db.commit()
+                db.refresh(existing_user)
                 logger.info(
                     "Payout onboarding account already exists for email %s; sending setup OTP",
                     existing_user.email,
@@ -980,6 +996,30 @@ async def save_player_banking_profile(
                 player_id,
                 data.create_account,
             )
+
+    if target_user:
+        payout_profile = (
+            db.query(PayoutProfile)
+            .filter(PayoutProfile.user_id == target_user.id)
+            .first()
+        )
+        if not payout_profile:
+            payout_profile = PayoutProfile(
+                user_id=target_user.id,
+                bank_name=(data.bank_code or "Unknown").strip() or "Unknown",
+                account_holder_name=data.account_holder_name,
+                account_number=(data.account_number or "").strip(),
+                sort_code=data.routing_number,
+                iban=None,
+            )
+            db.add(payout_profile)
+        else:
+            payout_profile.bank_name = (data.bank_code or payout_profile.bank_name or "Unknown").strip() or "Unknown"
+            payout_profile.account_holder_name = data.account_holder_name
+            payout_profile.account_number = (data.account_number or payout_profile.account_number or "").strip()
+            payout_profile.sort_code = data.routing_number
+
+        db.commit()
 
     return profile
 

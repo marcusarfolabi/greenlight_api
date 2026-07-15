@@ -40,6 +40,8 @@
                       <th align="left" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Payout</th>
                       <th align="left" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Account Holder</th>
                       <th align="left" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Email</th>
+                      <th align="left" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Phone</th>
+                      <th align="left" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Bank Name/Code</th>
                       <th align="left" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Account</th>
                     </tr>
                   </thead>
@@ -51,6 +53,8 @@
                       <td style="padding: 8px; border-bottom: 1px solid #f3f4f6;">{{ row.payout_amount }}</td>
                       <td style="padding: 8px; border-bottom: 1px solid #f3f4f6;">{{ row.account_holder_name }}</td>
                       <td style="padding: 8px; border-bottom: 1px solid #f3f4f6;">{{ row.email }}</td>
+                      <td style="padding: 8px; border-bottom: 1px solid #f3f4f6;">{{ row.phone_number }}</td>
+                      <td style="padding: 8px; border-bottom: 1px solid #f3f4f6;">{{ row.bank_name_or_code }}</td>
                       <td style="padding: 8px; border-bottom: 1px solid #f3f4f6;">{{ row.masked_account_number }}</td>
                     </tr>
                     {% endfor %}
