@@ -1,0 +1,129 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        font-family:
+          "Instrument Sans",
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+        background-color: #ffffff;
+        color: #171717;
+        margin: 0;
+        padding: 40px 20px;
+      }
+      .container {
+        max-width: 520px;
+        margin: 0 auto;
+        border: 1px solid #eaeaea;
+        border-radius: 10px;
+        padding: 36px;
+      }
+      .title {
+        font-size: 22px;
+        font-weight: 700;
+        margin-bottom: 12px;
+      }
+      .text {
+        font-size: 14px;
+        line-height: 1.6;
+        color: #4b5563;
+        margin: 0 0 12px 0;
+      }
+      .steps {
+        margin: 14px 0 20px;
+        padding-left: 18px;
+      }
+      .steps li {
+        margin-bottom: 8px;
+        color: #374151;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      .otp-container {
+        background-color: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        text-align: center;
+        padding: 16px;
+        margin: 16px 0;
+      }
+      .otp-code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 32px;
+        letter-spacing: 4px;
+        font-weight: 700;
+        color: #111827;
+      }
+      .button {
+        display: inline-block;
+        background: #111827;
+        color: #ffffff !important;
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 14px;
+        padding: 10px 16px;
+        border-radius: 8px;
+        margin: 8px 0 14px;
+      }
+      .footer {
+        border-top: 1px solid #e5e7eb;
+        margin-top: 24px;
+        padding-top: 14px;
+        font-size: 12px;
+        color: #9ca3af;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div style="margin-bottom: 22px; text-align: center">
+        <img
+          src="https://greenlightquiz.com/email_logo.png"
+          alt="Green Light Quiz Logo"
+          style="display: block; width: 180px; height: auto; margin: 0 auto"
+        />
+      </div>
+
+      <div class="title">Welcome to {{ arena_name }}</div>
+      <p class="text">Hi {{ name }},</p>
+      <p class="text">
+        Your payout details were received successfully. To continue in your org
+        arena, complete these two steps:
+      </p>
+
+      <ol class="steps">
+        <li>
+          Welcome to <strong>{{ arena_name }}</strong>. Your account is now
+          linked for this arena.
+        </li>
+        <li>
+          Go to <strong>Forgot Password</strong> and create your password using
+          the code below.
+        </li>
+      </ol>
+
+      <a class="button" href="{{ forgot_password_url }}"
+        >Open Forgot Password</a
+      >
+
+      <div class="otp-container">
+        <div class="otp-code">{{ otp }}</div>
+      </div>
+
+      <p class="text">This code expires in 15 minutes.</p>
+
+      <div class="footer">&copy; 2026 Green Light Quiz</div>
+    </div>
+  </body>
+</html>

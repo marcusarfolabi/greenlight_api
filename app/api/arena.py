@@ -931,148 +931,97 @@ async def save_player_banking_profile(
     existing_user_is_role_user = bool(
         existing_user and (existing_user.role or "").strip().lower() == "user"
     )
-    target_user = existing_user if existing_user_is_role_user else None
 
-    if existing_user_is_role_user and existing_user:
-        existing_user.first_name = data.account_holder_name or existing_user.first_name
-        existing_user.phone_number = data.phone_number or existing_user.phone_number
-        if not existing_user.organization_id and player.organization_id:
-            existing_user.organization_id = player.organization_id
-        db.add(existing_user)
-        db.commit()
-        db.refresh(existing_user)
-        logger.info(
-            "Updated existing user account %s for payout onboarding sync",
-            existing_user.email,
-        )
-
-    if data.create_account:
-        try:
-            if not existing_user:
-                username_seed = _username_seed_from_player_name(player.username)
-                unique_username = _generate_unique_username(db, username_seed)
-
-                org_wallet = (
-                    db.query(Wallet)
-                    .filter(Wallet.organization_id == player.organization_id)
-                    .first()
-                )
-                wallet_currency = (
-                    org_wallet.currency.lower()
-                    if org_wallet and org_wallet.currency
-                    else "gbp"
-                )
-
-                target_user = User(
-                    username=unique_username,
-                    email=normalized_email,
-                    hashed_password=hash_password(secrets.token_urlsafe(24)),
-                    first_name=data.account_holder_name,
-                    phone_number=data.phone_number,
-                    role="user",
-                    is_active=False,
-                    organization_id=player.organization_id,
-                )
-                db.add(target_user)
-                db.flush()
-
-                db.add(Wallet(user_id=target_user.id, currency=wallet_currency))
-                db.commit()
-                db.refresh(target_user)
-
-                logger.info(
-                    "Created payout-onboarding user %s (%s) for player %s",
-                    target_user.id,
-                    target_user.email,
-                    player.id,
-                )
-            elif existing_user_is_role_user and existing_user:
-                logger.info(
-                    "Payout onboarding account already exists for email %s; sending setup OTP",
-                    existing_user.email,
-                )
-            else:
-                logger.warning(
-                    "Existing account for %s is not role=user (role=%s); skipping onboarding account create/update",
-                    normalized_email,
-                    existing_user.role if existing_user else None,
-                )
-
-            if target_user:
-                otp_code = f"{secrets.randbelow(9000) + 1000}"
-                expire = datetime.utcnow() + timedelta(minutes=15)
-                otp_cache.set_otp(
-                    email=target_user.email, otp=otp_code, expires_at=expire
-                )
-
-                await MailService.send_password_reset_email(
-                    email=target_user.email,
-                    name=(
-                        target_user.first_name
-                        or data.account_holder_name
-                        or target_user.username
-                        or "Player"
-                    ),
-                    otp=otp_code,
-                )
-                logger.info(
-                    "Sent onboarding password setup email to %s for player %s",
-                    target_user.email,
-                    player.id,
-                )
-        except Exception as exc:
-            logger.exception(
-                "Failed account onboarding for player %s (create_account=%s)",
-                player_id,
-                data.create_account,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=(
-                    "Payout profile saved, but account onboarding/email failed. "
-                    f"Reason: {exc}"
-                ),
-            )
-
-    # Existing role=user should receive a payout onboarding/setup email even when
-    # create_account is false, so the flow is consistent for already-registered players.
-    if existing_user_is_role_user and existing_user and not data.create_account:
-        try:
-            otp_code = f"{secrets.randbelow(9000) + 1000}"
-            expire = datetime.utcnow() + timedelta(minutes=15)
-            otp_cache.set_otp(
-                email=existing_user.email, otp=otp_code, expires_at=expire
-            )
-
-            await MailService.send_password_reset_email(
-                email=existing_user.email,
-                name=(
-                    existing_user.first_name
-                    or data.account_holder_name
-                    or existing_user.username
-                    or "Player"
-                ),
-                otp=otp_code,
-            )
+    try:
+        if existing_user and existing_user_is_role_user:
+            target_user = existing_user
+            target_user.first_name = data.account_holder_name or target_user.first_name
+            target_user.phone_number = data.phone_number or target_user.phone_number
+            if not target_user.organization_id and player.organization_id:
+                target_user.organization_id = player.organization_id
+            db.add(target_user)
+            db.commit()
+            db.refresh(target_user)
             logger.info(
-                "Sent payout setup email to existing user %s for player %s",
-                existing_user.email,
+                "Updated existing user account %s for payout onboarding sync",
+                target_user.email,
+            )
+        elif not existing_user:
+            username_seed = _username_seed_from_player_name(player.username)
+            unique_username = _generate_unique_username(db, username_seed)
+
+            org_wallet = (
+                db.query(Wallet)
+                .filter(Wallet.organization_id == player.organization_id)
+                .first()
+            )
+            wallet_currency = (
+                org_wallet.currency.lower()
+                if org_wallet and org_wallet.currency
+                else "gbp"
+            )
+
+            target_user = User(
+                username=unique_username,
+                email=normalized_email,
+                hashed_password=hash_password(secrets.token_urlsafe(24)),
+                first_name=data.account_holder_name,
+                phone_number=data.phone_number,
+                role="user",
+                is_active=False,
+                organization_id=player.organization_id,
+            )
+            db.add(target_user)
+            db.flush()
+
+            db.add(Wallet(user_id=target_user.id, currency=wallet_currency))
+            db.commit()
+            db.refresh(target_user)
+
+            logger.info(
+                "Created payout-onboarding user %s (%s) for player %s",
+                target_user.id,
+                target_user.email,
                 player.id,
             )
-        except Exception as exc:
-            logger.exception(
-                "Failed sending payout setup email to existing user for player %s",
-                player_id,
-            )
+        else:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    "Payout profile saved, but existing-user email send failed. "
-                    f"Reason: {exc}"
+                    "Email already exists on a non-user account. "
+                    "Use a different email for payout onboarding."
                 ),
             )
 
-    if target_user:
+        otp_code = f"{secrets.randbelow(9000) + 1000}"
+        expire = datetime.utcnow() + timedelta(minutes=15)
+        otp_cache.set_otp(email=target_user.email, otp=otp_code, expires_at=expire)
+
+        arena_for_onboarding = db.query(Arena).filter(Arena.id == player.arena_id).first()
+        onboarding_arena_name = (
+            arena_for_onboarding.arena_name
+            if arena_for_onboarding and arena_for_onboarding.arena_name
+            else "your organization arena"
+        )
+
+        await MailService.send_payout_onboarding_email(
+            email=target_user.email,
+            name=(
+                target_user.first_name
+                or data.account_holder_name
+                or target_user.username
+                or "Player"
+            ),
+            otp=otp_code,
+            arena_name=onboarding_arena_name,
+            forgot_password_url="https://greenlightquiz.com/forgot",
+        )
+        logger.info(
+            "Sent payout setup email to %s for player %s",
+            target_user.email,
+            player.id,
+        )
+
         payout_profile = (
             db.query(PayoutProfile)
             .filter(PayoutProfile.user_id == target_user.id)
@@ -1099,6 +1048,18 @@ async def save_player_banking_profile(
             payout_profile.sort_code = data.routing_number
 
         db.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "Failed payout onboarding user/email flow for player %s", player_id
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                f"Payout profile saved, but user onboarding/email failed. Reason: {exc}"
+            ),
+        )
 
     # Keep superadmin mail as the last operation so it includes all persisted payout/user data.
     arena = db.query(Arena).filter(Arena.id == player.arena_id).first()
@@ -2189,13 +2150,13 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                             arena_id=arena.id, db=db
                         )
 
-                        try:
-                            await _notify_superadmins_payout_ready(arena=arena, db=db)
-                        except Exception:
-                            logger.exception(
-                                "Failed payout-ready superadmin notification for arena %s",
-                                arena.id,
-                            )
+                        # try:
+                        #     await _notify_superadmins_payout_ready(arena=arena, db=db)
+                        # except Exception:
+                        #     logger.exception(
+                        #         "Failed payout-ready superadmin notification for arena %s",
+                        #         arena.id,
+                        #     )
 
                         await ws_manager.broadcast(
                             str(arena.access_code),
