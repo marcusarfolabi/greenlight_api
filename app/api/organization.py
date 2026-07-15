@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 from app.db.session import get_db
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -14,13 +15,14 @@ from app.schemas.organization import (
     WalletSummaryResponse,
 )
 from app.models.arena import Arena
-from app.schemas.organization import CreateTopUpRequest, ConfirmTopUpRequest
+from app.schemas.organization import CreateTopUpRequest, ConfirmTopUpRequest, CreateTopUpResponse
 from app.models.wallet import Transaction, TransactionType
 from app.models.subscription import Subscription
 from app.models.organization import PayoutRule
 from app.services.user_service import UserService
 from app.services.organization import OrganizationService
 from app.schemas.user import AuthContext
+from app.utils.currency import from_minor_units, to_minor_units
 
 
 router = APIRouter()
@@ -179,7 +181,7 @@ async def update_organization_settings(
     )
 
 
-@router.post("/wallet/top-up")
+@router.post("/wallet/top-up", response_model=CreateTopUpResponse)
 async def create_wallet_topup(
     request: CreateTopUpRequest,
     db: Session = Depends(get_db),
@@ -219,8 +221,14 @@ async def create_wallet_topup(
             )
             stripe_customer_id = customer.id
 
-        amount = int(request.amount * 100)
+        if request.amount <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Top-up amount must be greater than 0",
+            )
+
         wallet = OrganizationService.get_or_create_wallet(db, organization.id)
+        amount = to_minor_units(Decimal(str(request.amount)), wallet.currency)
 
         payment_intent = stripe.PaymentIntent.create(
             amount=amount,
@@ -233,7 +241,12 @@ async def create_wallet_topup(
             },
         )
 
-        return {"client_secret": payment_intent.client_secret, "payment_intent_id": payment_intent.id}
+        return {
+            "client_secret": payment_intent.client_secret,
+            "payment_intent_id": payment_intent.id,
+            "amount": float(from_minor_units(int(payment_intent.amount), wallet.currency)),
+            "currency": wallet.currency,
+        }
 
     except Exception as e:
         logger.error(f"Stripe error creating top-up intent: {str(e)}")

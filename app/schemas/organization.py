@@ -167,5 +167,12 @@ class CreateTopUpRequest(BaseModel):
     currency: Optional[str] = Field(None, description="ISO currency code (e.g. 'usd', 'gbp')")
 
 
+class CreateTopUpResponse(BaseModel):
+    client_secret: str
+    payment_intent_id: str
+    amount: float
+    currency: str
+
+
 class ConfirmTopUpRequest(BaseModel):
     payment_intent_id: str

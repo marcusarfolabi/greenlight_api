@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import BackgroundTasks
@@ -12,12 +13,15 @@ from app.models.subscription import Subscription, SubscriptionPlan
 from app.models.wallet import Transaction, TransactionType, Wallet
 from app.services.mail_service import mail_service
 from app.services.organization import OrganizationService
+from app.utils.currency import convert_major_amount, from_minor_units, to_minor_units
 
 logger = logging.getLogger(__name__)
 
 
 class SubscriptionService:
     """Service for managing subscription operations including token allocation"""
+
+    TOKEN_PRICE_BASE_GBP_PER_10000 = Decimal("2.00")
 
     @staticmethod
     def create_subscription(
@@ -26,6 +30,7 @@ class SubscriptionService:
         plan_id: int,
         stripe_subscription_id: Optional[str] = None,
         stripe_customer_id: Optional[str] = None,
+        charged_amount_minor: Optional[int] = None,
         period_start: Optional[datetime] = None,
         period_end: Optional[datetime] = None,
         background_tasks: Optional[BackgroundTasks] = None,
@@ -105,9 +110,24 @@ class SubscriptionService:
 
         wallet = OrganizationService.get_or_create_wallet(db, organization_id)
 
+        charged_minor = charged_amount_minor
+        if charged_minor is None:
+            if plan.price and plan.price > 0:
+                plan_currency = (plan.currency or "gbp").lower()
+                wallet_currency = (wallet.currency or "gbp").lower()
+                plan_amount_major = Decimal(str(plan.price))
+                billed_amount_major = (
+                    convert_major_amount(plan_amount_major, plan_currency, wallet_currency)
+                    if wallet_currency != plan_currency
+                    else plan_amount_major
+                )
+                charged_minor = to_minor_units(billed_amount_major, wallet_currency)
+            else:
+                charged_minor = 0
+
         transaction = Transaction(
             wallet_id=wallet.id if wallet else None,
-            amount=-int(plan.price * 100),
+            amount=-int(charged_minor),
             type=TransactionType.SUBSCRIPTION,
             stripe_reference=stripe_subscription_id,
             status="completed",
@@ -123,6 +143,9 @@ class SubscriptionService:
             owner = organization.owner
             if owner and owner.email:
                 owner_name = owner.first_name or owner.username or "there"
+                billed_amount_major = from_minor_units(
+                    int(charged_minor), wallet.currency
+                )
                 background_tasks.add_task(
                     mail_service.send_subscription_message,
                     email=owner.email,
@@ -131,7 +154,7 @@ class SubscriptionService:
                     plan_details={
                         "plan_name": plan.name,
                         "plan_description": plan.description,
-                        "plan_price": f"{plan.price:.2f}",
+                        "plan_price": f"{float(billed_amount_major):.2f}",
                         "currency": wallet.currency.upper(),
                         "interval": plan.interval,
                         "ai_tokens": plan.ai_tokens,
@@ -265,14 +288,20 @@ class SubscriptionService:
         if not wallet:
             raise ValueError(f"Wallet for organization {organization_id} not found")
 
-        # Calculate cost: 10000 tokens = 200 cents (£2.00)
-        # So 1 token = 0.02 cents = 0.0002 pounds
-        cost_in_cents = int((token_amount / 10000) * 200)
+        quote = SubscriptionService.get_token_purchase_quote(
+            db=db,
+            organization_id=organization_id,
+            token_amount=token_amount,
+        )
+        cost_in_cents = quote["cost_in_minor"]
 
         if wallet.balance < cost_in_cents:
+            required_major = from_minor_units(cost_in_cents, wallet.currency)
+            available_major = from_minor_units(wallet.balance, wallet.currency)
             raise ValueError(
-                f"Insufficient wallet balance. Required: {cost_in_cents / 100:.2f}, "
-                f"Available: {wallet.balance / 100:.2f}"
+                "Insufficient wallet balance. "
+                f"Required: {float(required_major):.2f} {wallet.currency.upper()}, "
+                f"Available: {float(available_major):.2f} {wallet.currency.upper()}"
             )
 
         # Deduct from wallet
@@ -321,5 +350,52 @@ class SubscriptionService:
             "tokens_purchased": token_amount,
             "total_tokens": organization.capped_tokens or 0,
             "wallet_balance_remaining": wallet.balance,
+            "cost_charged": float(from_minor_units(cost_in_cents, wallet.currency)),
             "currency": wallet.currency,
+        }
+
+    @staticmethod
+    def get_token_purchase_quote(
+        db: Session,
+        organization_id: int,
+        token_amount: int,
+    ) -> dict:
+        """Calculate token purchase cost in the organization's wallet currency."""
+        organization = (
+            db.query(Organization).filter(Organization.id == organization_id).first()
+        )
+
+        if not organization:
+            raise ValueError(f"Organization {organization_id} not found")
+
+        wallet = (
+            db.query(Wallet).filter(Wallet.organization_id == organization_id).first()
+        )
+
+        if not wallet:
+            raise ValueError(f"Wallet for organization {organization_id} not found")
+
+        if token_amount <= 0:
+            raise ValueError("Token amount must be greater than 0")
+
+        base_gbp_major = (
+            Decimal(token_amount) / Decimal("10000")
+        ) * SubscriptionService.TOKEN_PRICE_BASE_GBP_PER_10000
+
+        wallet_currency = (wallet.currency or "gbp").lower()
+        cost_major = (
+            convert_major_amount(base_gbp_major, "gbp", wallet_currency)
+            if wallet_currency != "gbp"
+            else base_gbp_major.quantize(Decimal("0.01"))
+        )
+
+        cost_minor = to_minor_units(cost_major, wallet_currency)
+        if token_amount > 0 and cost_minor <= 0:
+            cost_minor = 1
+
+        return {
+            "token_amount": token_amount,
+            "cost_in_minor": cost_minor,
+            "cost": float(from_minor_units(cost_minor, wallet_currency)),
+            "currency": wallet_currency,
         }

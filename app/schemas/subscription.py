@@ -8,6 +8,13 @@ class CreatePaymentIntentRequest(BaseModel):
     plan_id: int
 
 
+class CreatePaymentIntentResponse(BaseModel):
+    client_secret: str
+    payment_intent_id: str
+    amount: float
+    currency: str
+
+
 class ConfirmPaymentRequest(BaseModel):
     organization_id: int
     plan_id: int
@@ -24,6 +31,13 @@ class BuyTokensResponse(BaseModel):
     tokens_purchased: int
     total_tokens: int
     wallet_balance_remaining: int
+    cost_charged: float
+    currency: str
+
+
+class TokenPurchaseQuoteResponse(BaseModel):
+    token_amount: int
+    cost: float
     currency: str
 class SubscriptionPlanTypeSchema(str, Enum):
     FREE = "free"
@@ -74,6 +88,8 @@ class SubscriptionPlanResponse(SubscriptionPlanBase):
     plan_type: SubscriptionPlanTypeSchema
     stripe_product_id: Optional[str] = None
     stripe_price_id: Optional[str] = None
+    converted_price: Optional[float] = None
+    converted_currency: Optional[str] = None
     is_active: bool
     display_order: int
     created_at: datetime
