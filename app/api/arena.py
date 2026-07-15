@@ -24,9 +24,8 @@ from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user
-from app.core.security import hash_password
 from app.core.cache import otp_cache
+from app.core.security import get_current_user, hash_password
 from app.db.session import get_db
 from app.models.arena import Arena, ArenaTokenUsageLog, Question
 from app.models.organization import ArenaPayoutReport
@@ -148,7 +147,10 @@ def _mask_account_number(account_number: Optional[str]) -> str:
 async def _notify_superadmins_payout_ready(arena: Arena, db: Session) -> None:
     payout_rows_raw = (
         db.query(ArenaPayoutReport, PlayerBankingProfile)
-        .outerjoin(PlayerBankingProfile, PlayerBankingProfile.player_id == ArenaPayoutReport.player_id)
+        .outerjoin(
+            PlayerBankingProfile,
+            PlayerBankingProfile.player_id == ArenaPayoutReport.player_id,
+        )
         .filter(
             ArenaPayoutReport.arena_id == arena.id,
             ArenaPayoutReport.payout_amount_cents > 0,
@@ -176,10 +178,14 @@ async def _notify_superadmins_payout_ready(arena: Arena, db: Session) -> None:
                 ),
                 "email": profile.email if profile else "Not provided",
                 "phone_number": (
-                    profile.phone_number if profile and profile.phone_number else "Not provided"
+                    profile.phone_number
+                    if profile and profile.phone_number
+                    else "Not provided"
                 ),
                 "bank_name_or_code": (
-                    profile.bank_code if profile and profile.bank_code else "Not provided"
+                    profile.bank_code
+                    if profile and profile.bank_code
+                    else "Not provided"
                 ),
                 "masked_account_number": _mask_account_number(
                     profile.account_number if profile else None
@@ -919,12 +925,26 @@ async def save_player_banking_profile(
     db.refresh(profile)
 
     existing_user = (
-        db.query(User)
-        .filter(func.lower(User.email) == normalized_email)
-        .first()
+        db.query(User).filter(func.lower(User.email) == normalized_email).first()
     )
 
-    target_user = existing_user
+    existing_user_is_role_user = bool(
+        existing_user and (existing_user.role or "").strip().lower() == "user"
+    )
+    target_user = existing_user if existing_user_is_role_user else None
+
+    if existing_user_is_role_user and existing_user:
+        existing_user.first_name = data.account_holder_name or existing_user.first_name
+        existing_user.phone_number = data.phone_number or existing_user.phone_number
+        if not existing_user.organization_id and player.organization_id:
+            existing_user.organization_id = player.organization_id
+        db.add(existing_user)
+        db.commit()
+        db.refresh(existing_user)
+        logger.info(
+            "Updated existing user account %s for payout onboarding sync",
+            existing_user.email,
+        )
 
     if data.create_account:
         try:
@@ -966,35 +986,90 @@ async def save_player_banking_profile(
                     target_user.email,
                     player.id,
                 )
-            else:
-                existing_user.phone_number = data.phone_number or existing_user.phone_number
-                db.add(existing_user)
-                db.commit()
-                db.refresh(existing_user)
+            elif existing_user_is_role_user and existing_user:
                 logger.info(
                     "Payout onboarding account already exists for email %s; sending setup OTP",
                     existing_user.email,
                 )
+            else:
+                logger.warning(
+                    "Existing account for %s is not role=user (role=%s); skipping onboarding account create/update",
+                    normalized_email,
+                    existing_user.role if existing_user else None,
+                )
 
-            otp_code = f"{secrets.randbelow(9000) + 1000}"
-            expire = datetime.utcnow() + timedelta(minutes=15)
-            otp_cache.set_otp(email=target_user.email, otp=otp_code, expires_at=expire)
+            if target_user:
+                otp_code = f"{secrets.randbelow(9000) + 1000}"
+                expire = datetime.utcnow() + timedelta(minutes=15)
+                otp_cache.set_otp(
+                    email=target_user.email, otp=otp_code, expires_at=expire
+                )
 
-            await MailService.send_password_reset_email(
-                email=target_user.email,
-                name=(
-                    target_user.first_name
-                    or data.account_holder_name
-                    or target_user.username
-                    or "Player"
-                ),
-                otp=otp_code,
-            )
-        except Exception:
+                await MailService.send_password_reset_email(
+                    email=target_user.email,
+                    name=(
+                        target_user.first_name
+                        or data.account_holder_name
+                        or target_user.username
+                        or "Player"
+                    ),
+                    otp=otp_code,
+                )
+                logger.info(
+                    "Sent onboarding password setup email to %s for player %s",
+                    target_user.email,
+                    player.id,
+                )
+        except Exception as exc:
             logger.exception(
                 "Failed account onboarding for player %s (create_account=%s)",
                 player_id,
                 data.create_account,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    "Payout profile saved, but account onboarding/email failed. "
+                    f"Reason: {exc}"
+                ),
+            )
+
+    # Existing role=user should receive a payout onboarding/setup email even when
+    # create_account is false, so the flow is consistent for already-registered players.
+    if existing_user_is_role_user and existing_user and not data.create_account:
+        try:
+            otp_code = f"{secrets.randbelow(9000) + 1000}"
+            expire = datetime.utcnow() + timedelta(minutes=15)
+            otp_cache.set_otp(
+                email=existing_user.email, otp=otp_code, expires_at=expire
+            )
+
+            await MailService.send_password_reset_email(
+                email=existing_user.email,
+                name=(
+                    existing_user.first_name
+                    or data.account_holder_name
+                    or existing_user.username
+                    or "Player"
+                ),
+                otp=otp_code,
+            )
+            logger.info(
+                "Sent payout setup email to existing user %s for player %s",
+                existing_user.email,
+                player.id,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed sending payout setup email to existing user for player %s",
+                player_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    "Payout profile saved, but existing-user email send failed. "
+                    f"Reason: {exc}"
+                ),
             )
 
     if target_user:
@@ -1014,12 +1089,27 @@ async def save_player_banking_profile(
             )
             db.add(payout_profile)
         else:
-            payout_profile.bank_name = (data.bank_code or payout_profile.bank_name or "Unknown").strip() or "Unknown"
+            payout_profile.bank_name = (
+                data.bank_code or payout_profile.bank_name or "Unknown"
+            ).strip() or "Unknown"
             payout_profile.account_holder_name = data.account_holder_name
-            payout_profile.account_number = (data.account_number or payout_profile.account_number or "").strip()
+            payout_profile.account_number = (
+                data.account_number or payout_profile.account_number or ""
+            ).strip()
             payout_profile.sort_code = data.routing_number
 
         db.commit()
+
+    # Keep superadmin mail as the last operation so it includes all persisted payout/user data.
+    arena = db.query(Arena).filter(Arena.id == player.arena_id).first()
+    if arena:
+        try:
+            await _notify_superadmins_payout_ready(arena=arena, db=db)
+        except Exception:
+            logger.exception(
+                "Failed superadmin payout notification during banking save for player %s",
+                player_id,
+            )
 
     return profile
 
