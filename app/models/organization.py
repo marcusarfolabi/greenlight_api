@@ -120,12 +120,8 @@ class PayoutRule(Base):
 
     position: Mapped[str] = mapped_column(String(50))  # "1st", "2nd", "3rd", "top_5", etc.
     amount: Mapped[float] = mapped_column(Float)  # Amount in dollars
-    currency: Mapped[str] = mapped_column(String(3), default="gbp")  # "usd" or "gbp"
+    currency: Mapped[str] = mapped_column(String(3), default="gbp")  # "usd" or "gbp" 
 
-    stripe_product_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    stripe_price_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    stripe_transfer_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    
     organization: Mapped["Organization"] = relationship(back_populates="payout_rules")
 
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())

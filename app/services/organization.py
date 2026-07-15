@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import joinedload
 
 from app.models.organization import Organization
-from app.models.wallet import Wallet
+from app.models.wallet import Wallet, Transaction
 from app.schemas.organization import OrganizationCreate, OrgSettingsResponse
 from app.models.user import User
 from app.utils.currency import get_currency_by_country_code
@@ -140,7 +140,7 @@ class OrganizationService:
         return get_currency_by_country_code(org.country)
 
     @staticmethod
-    def get_wallet_summary(db: Session, org: Organization) -> dict:
+    def get_wallet_summary(db: Session, org: Organization, offset: int = 0, limit: int = 10) -> dict:
         wallet = OrganizationService.get_or_create_wallet(db, org.id)
 
         total_spent = sum(
@@ -148,23 +148,27 @@ class OrganizationService:
             for transaction in wallet.transactions
             if transaction.amount < 0 and transaction.status == "completed"
         )
-        pending_withheld = sum(
-            abs(transaction.amount)
-            for transaction in wallet.transactions
-            if transaction.status == "pending"
-        )
+        pending_withheld = wallet.pending_balance or 0
 
-        transactions = sorted(
-            wallet.transactions,
-            key=lambda transaction: transaction.created_at,
-            reverse=True,
-        )[:20]
+        paged_transactions = (
+            db.query(Transaction)
+            .filter(Transaction.wallet_id == wallet.id)
+            .order_by(Transaction.created_at.desc())
+            .offset(offset)
+            .limit(limit + 1)
+            .all()
+        )
+        has_more = len(paged_transactions) > limit
+        transactions = paged_transactions[:limit]
 
         return {
             "balance": wallet.balance,
             "total_spent": total_spent,
             "pending_withheld": pending_withheld,
             "currency": wallet.currency,
+            "offset": offset,
+            "limit": limit,
+            "has_more": has_more,
             "transactions": [
                 {
                     "id": transaction.id,

@@ -1,7 +1,7 @@
 import logging
 from decimal import Decimal
 from app.db.session import get_db
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 import stripe  # type: ignore
 from app.core.config import settings
@@ -27,6 +27,109 @@ from app.utils.currency import from_minor_units, to_minor_units
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _payout_rule_amount_minor(amount: float, currency: str) -> int:
+    return to_minor_units(Decimal(str(amount)), currency)
+
+
+def _total_payout_required_minor(rules: list[PayoutRule], currency: str) -> int:
+    return sum(
+        _payout_rule_amount_minor(rule.amount, currency)
+        for rule in rules
+        if rule.amount and rule.amount > 0
+    )
+
+
+def _build_rules_summary(rules: list[PayoutRule], currency: str) -> str:
+    if not rules:
+        return "no payout rules"
+
+    parts: list[str] = []
+    for rule in rules:
+        if not rule.amount or rule.amount <= 0:
+            continue
+        amount_major = from_minor_units(
+            _payout_rule_amount_minor(rule.amount, currency),
+            currency,
+        )
+        parts.append(
+            f"{rule.position}:{float(amount_major):.2f} {currency.upper()}"
+        )
+
+    return ", ".join(parts) if parts else "no payout rules"
+
+
+def _apply_pending_balance_delta(
+    db: Session,
+    wallet,
+    previous_required_minor: int,
+    next_required_minor: int,
+    rules_summary: str,
+) -> None:
+    delta_minor = next_required_minor - previous_required_minor
+
+    # Keep reserve buckets in sync with rule totals by transferring funds between
+    # available balance and pending reserve.
+    current_pending = wallet.pending_balance or 0
+    current_available = wallet.balance or 0
+
+    if delta_minor == 0:
+        wallet.pending_balance = max(0, next_required_minor)
+        db.add(wallet)
+        return
+
+    if delta_minor > 0 and current_available < delta_minor:
+        required_major = from_minor_units(delta_minor, wallet.currency)
+        available_major = from_minor_units(current_available, wallet.currency)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Insufficient wallet balance for payout scheduling. "
+                f"Additional reserve needed: {float(required_major):.2f} {wallet.currency.upper()}, "
+                f"Available: {float(available_major):.2f} {wallet.currency.upper()}. "
+                "Please top up your wallet at /settings/wallet before saving payout settings."
+            ),
+        )
+
+    if delta_minor > 0:
+        wallet.balance = max(0, current_available - delta_minor)
+        wallet.pending_balance = current_pending + delta_minor
+    else:
+        released = abs(delta_minor)
+        wallet.balance = current_available + released
+        wallet.pending_balance = max(0, current_pending - released)
+
+    if delta_minor > 0:
+        tx = Transaction(
+            wallet_id=wallet.id,
+            amount=-delta_minor,
+            type=TransactionType.PRIZE_PAYOUT,
+            status="pending",
+            description=(
+                f"Payout reserve increased by {float(from_minor_units(delta_minor, wallet.currency)):.2f} "
+                f"{wallet.currency.upper()} (new reserved total: "
+                f"{float(from_minor_units(next_required_minor, wallet.currency)):.2f} {wallet.currency.upper()}; "
+                f"{rules_summary})"
+            ),
+        )
+    else:
+        released = abs(delta_minor)
+        tx = Transaction(
+            wallet_id=wallet.id,
+            amount=released,
+            type=TransactionType.REFUND,
+            status="completed",
+            description=(
+                f"Payout reserve released by {float(from_minor_units(released, wallet.currency)):.2f} "
+                f"{wallet.currency.upper()} (new reserved total: "
+                f"{float(from_minor_units(next_required_minor, wallet.currency)):.2f} {wallet.currency.upper()}; "
+                f"{rules_summary})"
+            ),
+        )
+
+    db.add(wallet)
+    db.add(tx)
 
 
 @router.post("")
@@ -91,6 +194,8 @@ async def setup_user_organization(
 async def get_organization_wallet(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
 ):
     """Retrieve wallet balance, summary stats, and recent transactions."""
     org = OrganizationService.get_by_owner(db, auth.user_id)
@@ -100,7 +205,7 @@ async def get_organization_wallet(
             detail="Organization not found",
         )
 
-    return OrganizationService.get_wallet_summary(db, org)
+    return OrganizationService.get_wallet_summary(db, org, offset=offset, limit=limit)
 
 
 @router.get("/settings", response_model=OrgSettingsResponse)
@@ -152,25 +257,65 @@ async def update_organization_settings(
 
     # Update payout settings
     if settings_data.payouts:
+        wallet = OrganizationService.get_or_create_wallet(db, org.id)
+        existing_required_minor = _total_payout_required_minor(
+            org.payout_rules,
+            wallet.currency,
+        )
+
+        incoming_rules_payload = (
+            settings_data.payouts.payout_rules
+            if settings_data.payouts.enable_payouts and settings_data.payouts.payout_rules
+            else []
+        )
+        incoming_required_minor = sum(
+            _payout_rule_amount_minor(rule.amount, wallet.currency)
+            for rule in incoming_rules_payload
+            if rule.amount and rule.amount > 0
+        )
+
+        additional_required_minor = max(0, incoming_required_minor - existing_required_minor)
+        if additional_required_minor > wallet.balance:
+            required_major = from_minor_units(additional_required_minor, wallet.currency)
+            available_major = from_minor_units(wallet.balance, wallet.currency)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Insufficient wallet balance for payout scheduling. "
+                    f"Additional reserve needed: {float(required_major):.2f} {wallet.currency.upper()}, "
+                    f"Available: {float(available_major):.2f} {wallet.currency.upper()}. "
+                    "Please top up your wallet at /settings/wallet before saving payout settings."
+                ),
+            )
+
         org.enable_payouts = settings_data.payouts.enable_payouts
         org.request_payout_details = settings_data.payouts.request_payout_details
         org.payout_method = settings_data.payouts.payout_method
 
         # Update payout rules if provided
         if settings_data.payouts.payout_rules is not None:
-            # Clear existing rules
             db.query(PayoutRule).filter(PayoutRule.organization_id == org.id).delete()
 
-            # Add new rules
             for rule_data in settings_data.payouts.payout_rules:
-                new_rule = PayoutRule(
-                    organization_id=org.id,
-                    position=rule_data.position,
-                    amount=rule_data.amount
+                db.add(
+                    PayoutRule(
+                        organization_id=org.id,
+                        position=rule_data.position,
+                        amount=rule_data.amount,
+                    )
                 )
-                db.add(new_rule)
 
         db.flush()
+
+        refreshed_rules = db.query(PayoutRule).filter(PayoutRule.organization_id == org.id).all()
+        next_required_minor = _total_payout_required_minor(refreshed_rules, wallet.currency)
+        _apply_pending_balance_delta(
+            db,
+            wallet,
+            existing_required_minor,
+            next_required_minor,
+            _build_rules_summary(refreshed_rules, wallet.currency),
+        )
 
     db.commit()
     db.refresh(org)
@@ -362,12 +507,43 @@ async def create_payout_rule(
             detail=f"Payout rule for position '{rule_data.position}' already exists"
         )
 
+    wallet = OrganizationService.get_or_create_wallet(db, org.id)
+    existing_required_minor = _total_payout_required_minor(org.payout_rules, wallet.currency)
+    next_required_minor = existing_required_minor + _payout_rule_amount_minor(
+        rule_data.amount, wallet.currency
+    )
+    additional_required_minor = max(0, next_required_minor - existing_required_minor)
+    if additional_required_minor > wallet.balance:
+        required_major = from_minor_units(additional_required_minor, wallet.currency)
+        available_major = from_minor_units(wallet.balance, wallet.currency)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Insufficient wallet balance for payout scheduling. "
+                f"Additional reserve needed: {float(required_major):.2f} {wallet.currency.upper()}, "
+                f"Available: {float(available_major):.2f} {wallet.currency.upper()}. "
+                "Please top up your wallet at /settings/wallet before saving payout settings."
+            ),
+        )
+
     new_rule = PayoutRule(
         organization_id=org.id,
         position=rule_data.position,
         amount=rule_data.amount
     )
     db.add(new_rule)
+    db.flush()
+
+    refreshed_rules = db.query(PayoutRule).filter(PayoutRule.organization_id == org.id).all()
+    next_required_minor = _total_payout_required_minor(refreshed_rules, wallet.currency)
+    _apply_pending_balance_delta(
+        db,
+        wallet,
+        existing_required_minor,
+        next_required_minor,
+        _build_rules_summary(refreshed_rules, wallet.currency),
+    )
+
     db.commit()
     db.refresh(new_rule)
     return new_rule
@@ -399,8 +575,44 @@ async def update_payout_rule(
             detail="Payout rule not found"
         )
 
+    wallet = OrganizationService.get_or_create_wallet(db, org.id)
+    current_required_minor = _total_payout_required_minor(org.payout_rules, wallet.currency)
+    existing_excluding_current_minor = sum(
+        _payout_rule_amount_minor(r.amount, wallet.currency)
+        for r in org.payout_rules
+        if r.id != rule.id and r.amount and r.amount > 0
+    )
+    next_required_minor = existing_excluding_current_minor + _payout_rule_amount_minor(
+        rule_data.amount, wallet.currency
+    )
+    additional_required_minor = max(0, next_required_minor - current_required_minor)
+    if additional_required_minor > wallet.balance:
+        required_major = from_minor_units(additional_required_minor, wallet.currency)
+        available_major = from_minor_units(wallet.balance, wallet.currency)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Insufficient wallet balance for payout scheduling. "
+                f"Additional reserve needed: {float(required_major):.2f} {wallet.currency.upper()}, "
+                f"Available: {float(available_major):.2f} {wallet.currency.upper()}. "
+                "Please top up your wallet at /settings/wallet before saving payout settings."
+            ),
+        )
+
     rule.position = rule_data.position
     rule.amount = rule_data.amount
+    db.flush()
+
+    refreshed_rules = db.query(PayoutRule).filter(PayoutRule.organization_id == org.id).all()
+    next_required_minor = _total_payout_required_minor(refreshed_rules, wallet.currency)
+    _apply_pending_balance_delta(
+        db,
+        wallet,
+        current_required_minor,
+        next_required_minor,
+        _build_rules_summary(refreshed_rules, wallet.currency),
+    )
+
     db.commit()
     db.refresh(rule)
     return rule
@@ -431,7 +643,22 @@ async def delete_payout_rule(
             detail="Payout rule not found"
         )
 
+    wallet = OrganizationService.get_or_create_wallet(db, org.id)
+    current_required_minor = _total_payout_required_minor(org.payout_rules, wallet.currency)
+
     db.delete(rule)
+    db.flush()
+
+    refreshed_rules = db.query(PayoutRule).filter(PayoutRule.organization_id == org.id).all()
+    next_required_minor = _total_payout_required_minor(refreshed_rules, wallet.currency)
+    _apply_pending_balance_delta(
+        db,
+        wallet,
+        current_required_minor,
+        next_required_minor,
+        _build_rules_summary(refreshed_rules, wallet.currency),
+    )
+
     db.commit()
 
 

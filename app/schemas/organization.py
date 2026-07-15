@@ -127,6 +127,9 @@ class WalletSummaryResponse(BaseModel):
     pending_withheld: int = Field(..., description="Pending or withheld amount in cents")
     currency: str = "usd"
     stripe_connect_id: Optional[str] = None
+    offset: int = 0
+    limit: int = 10
+    has_more: bool = False
     transactions: List[WalletTransactionResponse] = Field(default_factory=list)
 
 
