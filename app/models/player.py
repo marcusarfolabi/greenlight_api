@@ -19,6 +19,7 @@ class Player(Base):
     arena_id: Mapped[str] = mapped_column(ForeignKey("arenas.id"))
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"))
     arena_access_code: Mapped[int] = mapped_column(Integer)
+    session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     attempt_date: Mapped[datetime] = mapped_column(insert_default=func.now())
     status: Mapped[str] = mapped_column(String(20), default="joined")  # joined, in_progress, completed
@@ -43,7 +44,7 @@ class Player(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint('arena_id', 'username', name='_arena_nickname_uc'),
+        UniqueConstraint('arena_id', 'session_id', 'username', name='_arena_session_nickname_uc'),
     )
 
 

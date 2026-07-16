@@ -8,6 +8,7 @@ class PlayerCreate(BaseModel):
     arena_id: str
     organization_id: int
     arena_access_code: int
+    session_id: Optional[str] = None
     username: Optional[str] = None
     attempt_date: Optional[datetime] = None
     status: Optional[str] = "joined"

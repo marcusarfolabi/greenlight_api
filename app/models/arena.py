@@ -23,6 +23,7 @@ class Arena(Base):
 
     ai_tokens_used: Mapped[int] = mapped_column(default=0)
     access_code: Mapped[Optional[int]] = mapped_column(default=lambda: secrets.randbelow(9000) + 1000, nullable=True)  # per-arena access code
+    players_session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(insert_default=func.now(), onupdate=func.now())

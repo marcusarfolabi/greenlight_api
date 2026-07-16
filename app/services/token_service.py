@@ -2,14 +2,13 @@
 Token usage tracking for AI operations
 """
 import logging
-from typing import Optional, Union
+from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.arena import Arena
 from app.models.player import Player
 from app.models.subscription import Subscription
-from app.core.config import settings
 from app.models.organization import Organization
 
 logger = logging.getLogger(__name__)
@@ -212,6 +211,7 @@ class TokenService:
         organization_id: int,
         additional_players: int,
         arena_id: str,
+        session_id: Optional[str] = None,
     ) -> tuple[bool, Optional[str]]:
         """Check if an arena can admit more players based on org subscription limits."""
         subscription = db.query(Subscription).filter(
@@ -222,9 +222,11 @@ class TokenService:
         if not subscription:
             return False, "No active subscription"
 
-        current_player_count = db.query(Player).filter(
-            Player.arena_id == arena_id
-        ).count()
+        query = db.query(Player).filter(Player.arena_id == arena_id)
+        if session_id:
+            query = query.filter(Player.session_id == session_id)
+
+        current_player_count = query.count()
 
         if subscription.plan.max_players is not None and (current_player_count + additional_players) > subscription.plan.max_players:
             return (

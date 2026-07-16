@@ -54,15 +54,15 @@ app = FastAPI(
 async def startup_event():
     logger.info("Initializing database and running seeders...")
     try:
-        # with engine.begin() as connection:
-        #     table_names = ", ".join([f'"{table.name}"' for table in Base.metadata.sorted_tables])
+        with engine.begin() as connection:
+            table_names = ", ".join([f'"{table.name}"' for table in Base.metadata.sorted_tables])
 
-        #     if table_names:
-        #         logger.info(f"Force dropping tables: {table_names}")
-        #         connection.execute(text(f"DROP TABLE IF EXISTS {table_names} CASCADE;"))
-        #         logger.info("Database cleanly wiped via raw CASCADE.")
-        #     else:
-        #         logger.info("No tables discovered to drop.")
+            if table_names:
+                logger.info(f"Force dropping tables: {table_names}")
+                connection.execute(text(f"DROP TABLE IF EXISTS {table_names} CASCADE;"))
+                logger.info("Database cleanly wiped via raw CASCADE.")
+            else:
+                logger.info("No tables discovered to drop.")
 
         # Recreate tables cleanly from
         Base.metadata.create_all(bind=engine)

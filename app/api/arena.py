@@ -3,6 +3,7 @@ import csv
 import io
 import logging
 import secrets
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -64,6 +65,27 @@ logger = logging.getLogger(__name__)
 # Upload limits
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_PDF_PAGES = 50
+
+
+def _new_players_session_id() -> str:
+    return str(uuid.uuid4())
+
+
+def _ensure_arena_session_id(db: Session, arena: Arena) -> str:
+    if arena.players_session_id:
+        return arena.players_session_id
+
+    arena.players_session_id = _new_players_session_id()
+    db.add(arena)
+    db.flush()
+    return arena.players_session_id
+
+
+def _players_for_arena_session_query(db: Session, arena: Arena):
+    query = db.query(Player).filter(Player.arena_id == arena.id)
+    if arena.players_session_id:
+        query = query.filter(Player.session_id == arena.players_session_id)
+    return query
 
 
 async def _bg_send_sms(
@@ -262,6 +284,7 @@ async def create_arena(
             creator_organization_id=org.id,
             is_public=data.is_public,
             ai_tokens_used=total_ai_tokens,
+            players_session_id=_new_players_session_id(),
         )
         db.add(new_arena)
         db.flush()
@@ -407,7 +430,7 @@ async def list_arenas(
 
     results = []
     for a in arenas:
-        total_players = db.query(Player).filter(Player.arena_id == a.id).count()
+        total_players = _players_for_arena_session_query(db, a).count()
         total_questions = len(a.questions) if a.questions else 0
 
         results.append(
@@ -465,10 +488,10 @@ async def get_arena(
     )
 
     # Calculate player stats
-    total_players = db.query(Player).filter(Player.arena_id == arena_id).count()
+    total_players = _players_for_arena_session_query(db, arena).count()
     completed_players = (
-        db.query(Player)
-        .filter(Player.arena_id == arena_id, Player.status == "completed")
+        _players_for_arena_session_query(db, arena)
+        .filter(Player.status == "completed")
         .count()
     )
     completion_rate = (
@@ -777,11 +800,16 @@ async def validate_access_code(
     org_id = getattr(arena, "creator_organization_id", None) or getattr(
         arena, "organization_id", None
     )
+    active_session_id = _ensure_arena_session_id(db, arena)
 
     # Check if this nickname already exists for the arena (idempotent)
     existing = (
         db.query(Player)
-        .filter(Player.arena_id == arena.id, Player.username == player_nickname)
+        .filter(
+            Player.arena_id == arena.id,
+            Player.session_id == active_session_id,
+            Player.username == player_nickname,
+        )
         .first()
     )
 
@@ -793,9 +821,7 @@ async def validate_access_code(
             "player_id": existing.id,
             "player_username": existing.username,
             "organization_id": existing.organization_id,
-            "total_players": db.query(Player)
-            .filter(Player.arena_id == arena.id)
-            .count(),
+            "total_players": _players_for_arena_session_query(db, arena).count(),
         }
 
     if org_id:
@@ -804,6 +830,7 @@ async def validate_access_code(
             organization_id=org_id,
             additional_players=1,
             arena_id=arena.id,
+            session_id=active_session_id,
         )
         if not allowed:
             raise HTTPException(
@@ -815,6 +842,7 @@ async def validate_access_code(
         arena_id=arena.id,
         organization_id=org_id,
         arena_access_code=access_code_int,
+        session_id=active_session_id,
         username=player_nickname,
         status="joined",
     )
@@ -828,7 +856,11 @@ async def validate_access_code(
         db.rollback()
         existing = (
             db.query(Player)
-            .filter(Player.arena_id == arena.id, Player.username == player_nickname)
+            .filter(
+                Player.arena_id == arena.id,
+                Player.session_id == active_session_id,
+                Player.username == player_nickname,
+            )
             .first()
         )
         if existing:
@@ -839,9 +871,7 @@ async def validate_access_code(
                 "player_id": existing.id,
                 "player_username": existing.username,
                 "organization_id": existing.organization_id,
-                "total_players": db.query(Player)
-                .filter(Player.arena_id == arena.id)
-                .count(),
+                "total_players": _players_for_arena_session_query(db, arena).count(),
             }
         # If still not found, re-raise
         raise
@@ -853,12 +883,12 @@ async def validate_access_code(
         "player_id": new_player.id,
         "player_username": new_player.username,
         "organization_id": new_player.organization_id,
-        "total_players": db.query(Player).filter(Player.arena_id == arena.id).count(),
+        "total_players": _players_for_arena_session_query(db, arena).count(),
     }
 
     # Broadcast lobby update to connected websocket clients (fire-and-forget)
     try:
-        players = db.query(Player).filter(Player.arena_id == arena.id).all()
+        players = _players_for_arena_session_query(db, arena).all()
         players_list = [{"id": p.id, "username": p.username} for p in players]
         payload = {
             "type": "lobby_update",
@@ -1481,7 +1511,7 @@ async def get_arena_players(
         )
 
     # Base query for players in arena
-    query = db.query(Player).filter(Player.arena_id == arena_id)
+    query = _players_for_arena_session_query(db, arena)
     total_players = query.count()  # Get total count for pagination
 
     if search:
@@ -1491,10 +1521,13 @@ async def get_arena_players(
             db.query(Player)
             .outerjoin(Arena, Player.arena_id == Arena.id)
             .filter(
+                Player.arena_id == arena_id,
                 func.lower(Player.username).like(pattern)
                 | func.lower(Arena.arena_name).like(pattern)
             )
         )
+        if arena.players_session_id:
+            query = query.filter(Player.session_id == arena.players_session_id)
 
     players = query.offset(offset).limit(limit).all()
 
@@ -1507,6 +1540,7 @@ async def get_arena_players(
                     "arena_id": p.arena_id,
                     "organization_id": p.organization_id,
                     "arena_access_code": p.arena_access_code,
+                    "session_id": p.session_id,
                     "username": p.username,
                     "attempt_date": p.attempt_date,
                     "status": p.status,
@@ -1649,7 +1683,7 @@ async def get_lobby_info(
             status_code=status.HTTP_404_NOT_FOUND, detail="Invalid access code"
         )
 
-    players = db.query(Player).filter(Player.arena_id == arena.id).all()
+    players = _players_for_arena_session_query(db, arena).all()
     players_list = []
     for p in players:
         players_list.append(
@@ -1768,7 +1802,7 @@ def get_arena_scoreboard(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Arena not found"
         )
-    players = db.query(Player).filter(Player.arena_id == arena_id).all()
+    players = _players_for_arena_session_query(db, arena).all()
 
     scoreboard_data = []
     for player in players:
@@ -1820,7 +1854,13 @@ def get_arena_scoreboard(
 
 
 async def close_arena_and_build_payout_ledger(arena_id: str, db: Session) -> dict:
-    players = db.query(Player).filter(Player.arena_id == arena_id).all()
+    arena = db.query(Arena).filter(Arena.id == arena_id).first()
+    if not arena:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Arena not found"
+        )
+
+    players = _players_for_arena_session_query(db, arena).all()
 
     if not players:
         return {
@@ -1943,6 +1983,11 @@ async def close_arena_and_build_payout_ledger(arena_id: str, db: Session) -> dic
 
     db.commit()
 
+    # Prepare a fresh session tag for the next time this arena is played.
+    arena.players_session_id = _new_players_session_id()
+    db.add(arena)
+    db.commit()
+
     return {
         "scoreboard": [
             {
@@ -1986,7 +2031,7 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
             player_info["arena_id"] = arena.id
 
             # Fetch players based on arena ID
-            players = db.query(Player).filter(Player.arena_id == arena.id).all()
+            players = _players_for_arena_session_query(db, arena).all()
             players_list = [{"id": p.id, "username": p.username} for p in players]
 
             payload = {
@@ -2022,6 +2067,7 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                                 db.query(Player)
                                 .filter(
                                     Player.arena_id == arena.id,
+                                    Player.session_id == arena.players_session_id,
                                     Player.username == player_name,
                                 )
                                 .first()
