@@ -77,6 +77,7 @@ class UserCreate(UserBase):
     location: Optional[str] = None
     country_iso: Optional[str] = None
     accepted_terms: bool = False
+    client_ip: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_terms_acceptance(self) -> "UserCreate":

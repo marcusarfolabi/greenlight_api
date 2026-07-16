@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from app.core.security import hash_password
 from app.models.subscription import Subscription
 from app.models.user import User
-from app.models.wallet import Wallet
 from app.schemas.user import UserCreate, UserUpdate
 
 logger = logging.getLogger(__name__)
@@ -122,11 +121,6 @@ class UserService:
             db_user.organization_id = user_data.organization_id
 
         db.add(db_user)
-        db.flush()
-
-        wallet = Wallet(user_id=db_user.id, currency=location_data.get("currency"))
-
-        db.add(wallet)
         db.commit()
         db.refresh(db_user)
 

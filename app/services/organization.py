@@ -1,16 +1,14 @@
 import logging
 from typing import Optional
-from sqlalchemy.orm import Session
-from fastapi import HTTPException, status
 
-from sqlalchemy.orm import joinedload
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.organization import Organization
-from app.models.wallet import Wallet, Transaction
-from app.schemas.organization import OrganizationCreate, OrgSettingsResponse
 from app.models.user import User
+from app.models.wallet import Transaction, Wallet
+from app.schemas.organization import OrganizationCreate, OrgSettingsResponse
 from app.utils.currency import get_currency_by_country_code
-
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +61,7 @@ class OrganizationService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="User not found while creating organization.",
                 )
- 
+
             db_org = Organization(
                 name=org_data.name,
                 industry=org_data.industry,
@@ -77,14 +75,18 @@ class OrganizationService:
             if wallet is None:
                 wallet = db.query(Wallet).filter(Wallet.user_id == user.id).first()
 
-                if not wallet:
-                    wallet = Wallet(
-                        user_id=user.id,
-                        organization_id=db_org.id,
-                    )
-                    db.add(wallet)
+            if wallet is None:
+                wallet = (
+                    db.query(Wallet).filter(Wallet.organization_id == db_org.id).first()
+                )
 
-            wallet.organization_id = db_org.id
+            if wallet is None:
+                wallet = Wallet(organization_id=db_org.id, currency="gbp")
+                db.add(wallet)
+            else:
+                wallet.organization_id = db_org.id
+                wallet.user_id = None
+
             db.commit()
 
             user.organization_id = db_org.id
