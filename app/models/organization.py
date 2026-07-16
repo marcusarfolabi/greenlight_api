@@ -17,13 +17,9 @@ class Organization(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
-    subdomain: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     industry: Mapped[str] = mapped_column(String(50))
     capped_tokens: Mapped[Optional[int]] = mapped_column()
-
-    city: Mapped[Optional[str]] = mapped_column(String(100))
-    state: Mapped[Optional[str]] = mapped_column(String(100))
-    country: Mapped[Optional[str]] = mapped_column(String(100))
+ 
     is_verified: Mapped[bool] = mapped_column(default=False)
 
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -120,7 +116,7 @@ class PayoutRule(Base):
 
     position: Mapped[str] = mapped_column(String(50))  # "1st", "2nd", "3rd", "top_5", etc.
     amount: Mapped[float] = mapped_column(Float)  # Amount in dollars
-    currency: Mapped[str] = mapped_column(String(3), default="gbp")  # "usd" or "gbp" 
+    currency: Mapped[str] = mapped_column(String(3), default="gbp")  # "usd" or "gbp"
 
     organization: Mapped["Organization"] = relationship(back_populates="payout_rules")
 

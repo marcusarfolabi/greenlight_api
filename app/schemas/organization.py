@@ -5,13 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class OrganizationBase(BaseModel):
     name: str
-    subdomain: str
     industry: str
     capped_tokens: Optional[int] = None
-    stripe_connect_id: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    country: Optional[str] = None
 
 
 class OrganizationCreate(OrganizationBase):

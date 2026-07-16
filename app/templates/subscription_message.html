@@ -158,12 +158,6 @@
           </span>
         </div>
 
-        <div class="row">
-          <span class="label">Custom themes</span>
-          <span class="value">
-            {% if max_custom_themes is not none %}Up to {{ max_custom_themes }} themes{% else %}Unlimited themes{% endif %}
-          </span>
-        </div>
 
         {% if period_end %}
           <div class="row">
@@ -179,8 +173,6 @@
         <li>Live arenas with real-time scoring and leaderboards.</li>
         <li>AI-assisted question generation using your included token capacity.</li>
         {% if analytics %}<li>Analytics for tracking arena and player performance.</li>{% endif %}
-        {% if api_access %}<li>API access for deeper integrations.</li>{% endif %}
-        {% if white_label %}<li>White-label options for branded experiences.</li>{% endif %}
         {% if priority_support %}<li>Priority support from the GreenLight team.</li>{% endif %}
       </ul>
 

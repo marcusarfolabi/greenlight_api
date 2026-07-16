@@ -1,6 +1,7 @@
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
+from fastapi import Request  # Import Request
 
 import requests
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, status
@@ -102,6 +103,7 @@ async def login(
             "linkedin_id": user.linkedin_id,
             "apple_id": user.apple_id,
             "role": user.role,
+            "location": user.location,
             "hasOrg": hasOrg,
             "org_id": org_id,
             "hasSub": hasSub,
@@ -158,6 +160,7 @@ async def refresh_user_token(
 @router.post("/google")
 async def auth_google(
     payload: GoogleTokenPayload,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
@@ -210,6 +213,11 @@ async def auth_google(
                 accepted_terms=True,
             )
 
+            client_ip = request.headers.get("CF-Connecting-IP") or \
+                            request.headers.get("X-Forwarded-For") or \
+                            request.client.host
+
+            new_user_data.client_ip = client_ip
             user = UserService.create_user(db, new_user_data)
             logger.info(f"Successfully registered new user via Google: {email}")
 
@@ -258,6 +266,8 @@ async def auth_google(
                 "google_id": user.google_id,
                 "linkedin_id": user.linkedin_id,
                 "apple_id": user.apple_id,
+                "location": user.location,
+
             },
         }
 
@@ -274,153 +284,11 @@ async def auth_google(
             detail="Invalid Google OAuth token signature or token expired",
         )
 
-
-@router.post("/apple")
-async def auth_apple(
-    payload: AppleTokenPayload,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-):
-    try:
-        jwks_response = requests.get("https://appleid.apple.com/auth/keys", timeout=10)
-        jwks_response.raise_for_status()
-        jwks = jwks_response.json()
-
-        header = jwt.get_unverified_header(payload.token)
-        key = next(
-            (
-                item
-                for item in jwks.get("keys", [])
-                if item.get("kid") == header.get("kid")
-            ),
-            None,
-        )
-
-        if not key:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unable to verify Apple identity token.",
-            )
-
-        claims = jwt.decode(
-            payload.token,
-            key,
-            audience=settings.APPLE_CLIENT_ID,
-            algorithms=["RS256"],
-        )
-
-        apple_id = claims.get("sub")
-        email = claims.get("email")
-        first_name = claims.get("given_name")
-        last_name = claims.get("family_name")
-
-        if not email or not apple_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Apple account missing identity parameters.",
-            )
-
-        user = UserService.get_user_by_apple_id(db, apple_id)
-
-        if not user:
-            user = UserService.get_user_by_email(db, email)
-            if user:
-                user = UserService.update_user_social_id(
-                    db, user.id, "apple_id", apple_id
-                )
-                logger.info(f"Linked existing account to Apple ID for: {email}")
-
-        if not user:
-            base_username = email.split("@")[0].replace(".", "_")
-            username = base_username
-
-            counter = 1
-            while UserService.get_user_by_username(db, username):
-                username = f"{base_username}_{counter}"
-                counter += 1
-
-            new_user_data = UserCreate(
-                email=email,
-                username=username,
-                first_name=first_name,
-                last_name=last_name,
-                password=secrets.token_urlsafe(16),
-                role=payload.role or "user",
-                is_active=True,
-                apple_id=apple_id,
-                location=payload.location,
-                country_iso=payload.country_iso,
-                accepted_terms=True,
-            )
-
-            user = UserService.create_user(db, new_user_data)
-            logger.info(f"Successfully registered new user via Apple: {email}")
-
-            user_display_name = new_user_data.first_name or user.username
-            background_tasks.add_task(
-                mail_service.send_welcome_email,
-                email=user.email,
-                name=user_display_name,
-                org_name="",
-            )
-
-        hasOrg = UserService.user_has_org(db, user.id)
-        org_id = UserService.get_user_org_id(db, user.id) if hasOrg else None
-
-        hasSub = False
-        if org_id is not None:
-            hasSub = UserService.user_has_subscription(db, org_id)
-
-        token_data = {
-            "sub": str(user.id),
-            "role": user.role,
-            "username": user.username,
-            "org_id": org_id,
-            "has_subscription": hasSub,
-        }
-
-        access_token = create_access_token(token_data)
-        refresh_token = create_refresh_token({"sub": str(user.id)})
-
-        response_data = {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
-            "user": {
-                "id": user.id,
-                "username": user.username,
-                "email": user.email,
-                "role": user.role,
-                "is_active": user.is_active,
-                "created_at": user.created_at.isoformat()
-                if hasattr(user.created_at, "isoformat")
-                else user.created_at,
-                "hasOrg": hasOrg,
-                "org_id": org_id,
-                "hasSub": hasSub,
-                "google_id": user.google_id,
-                "linkedin_id": user.linkedin_id,
-                "apple_id": user.apple_id,
-            },
-        }
-
-        if hasOrg:
-            response_data["user"]["subdomain"] = UserService.user_sub_domain(
-                db, user.id
-            )
-
-        return response_data
-
-    except (ValueError, jwt.JWTError):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Apple identity token signature or token expired",
-        )
-
-
 @router.post("/linkedin")
 async def auth_linkedin(
     payload: LinkedInTokenPayload,
+    request: Request,
+
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
@@ -550,6 +418,10 @@ async def auth_linkedin(
             country_iso=payload.country_iso,
             accepted_terms=True,
         )
+        client_ip = request.headers.get("CF-Connecting-IP") or \
+                    request.headers.get("X-Forwarded-For") or \
+                    request.client.host
+        new_user_data.client_ip = client_ip
 
         user = UserService.create_user(db, new_user_data)
         logger.info(f"Successfully registered new user via LinkedIn: {email}")
@@ -599,6 +471,8 @@ async def auth_linkedin(
             "google_id": user.google_id,
             "linkedin_id": user.linkedin_id,
             "apple_id": user.apple_id,
+            "location": user.location,
+
         },
     }
 
@@ -611,6 +485,7 @@ async def auth_linkedin(
 @router.post("/register")
 async def register(
     user_data: UserCreate,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
@@ -625,6 +500,11 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already taken",
         )
+
+    client_ip = request.headers.get("CF-Connecting-IP") or \
+                    request.headers.get("X-Forwarded-For") or \
+                    request.client.host
+    user_data.client_ip = client_ip
 
     new_user = UserService.create_user(db, user_data)
 
@@ -650,7 +530,6 @@ async def register(
             otp=otp_code,
         )
     except Exception as exc:
-        # Registration is already persisted at this point; do not fail the API response.
         logger.exception(
             "Post-registration side effects failed for user_id=%s: %s", new_user.id, exc
         )

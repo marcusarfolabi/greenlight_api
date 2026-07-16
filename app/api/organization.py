@@ -133,7 +133,7 @@ def _apply_pending_balance_delta(
 
 
 @router.post("")
-async def setup_user_organization(
+async def setup_host_organization(
     org_data: OrganizationCreate,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(get_current_user)

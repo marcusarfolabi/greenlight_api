@@ -14,12 +14,15 @@ from app.utils.currency import get_currency_by_country_code
 
 logger = logging.getLogger(__name__)
 
+
 class OrganizationService:
     """Service layer for organization and host onboarding."""
 
     @staticmethod
     def get_by_subdomain(db: Session, subdomain: str) -> Organization | None:
-        return db.query(Organization).filter(Organization.subdomain == subdomain).first()
+        return (
+            db.query(Organization).filter(Organization.subdomain == subdomain).first()
+        )
 
     @staticmethod
     def get_by_owner(db: Session, owner_id: int) -> Organization | None:
@@ -28,10 +31,14 @@ class OrganizationService:
 
     @staticmethod
     def build_settings_response(org: Organization) -> OrgSettingsResponse:
-        return OrgSettingsResponse.model_validate(org).model_copy(update={"owner_id": org.owner_id, "is_verified": org.is_verified})
+        return OrgSettingsResponse.model_validate(org).model_copy(
+            update={"owner_id": org.owner_id, "is_verified": org.is_verified}
+        )
 
     @staticmethod
-    def extract_location_parts(location: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    def extract_location_parts(
+        location: str,
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
         if not location:
             return None, None, None
 
@@ -43,7 +50,9 @@ class OrganizationService:
         return None, None, parts[0]
 
     @staticmethod
-    def create_organization_for_user(db: Session, user_id: int, org_data: OrganizationCreate) -> Organization:
+    def create_organization_for_user(
+        db: Session, user_id: int, org_data: OrganizationCreate
+    ) -> Organization:
         """
         Creates a new organization in the database and links it to a specific host user.
         """
@@ -52,17 +61,12 @@ class OrganizationService:
             if user is None:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="User not found while creating organization."
+                    detail="User not found while creating organization.",
                 )
-
-            parsed_city, parsed_state, parsed_country = OrganizationService.extract_location_parts(user.location or "")
+ 
             db_org = Organization(
                 name=org_data.name,
-                subdomain=org_data.subdomain,
                 industry=org_data.industry,
-                city=org_data.city or parsed_city,
-                state=org_data.state or parsed_state,
-                country=org_data.country or parsed_country,
                 owner_id=user_id,
             )
 
@@ -76,7 +80,7 @@ class OrganizationService:
                 if not wallet:
                     wallet = Wallet(
                         user_id=user.id,
-                        currency=get_currency_by_country_code(user.location),
+                        organization_id=db_org.id,
                     )
                     db.add(wallet)
 
@@ -94,15 +98,19 @@ class OrganizationService:
             db.refresh(db_org)
             db.refresh(user)
 
-            logger.info(f"Successfully created organization '{db_org.name}' for user ID {user_id}")
+            logger.info(
+                f"Successfully created organization '{db_org.name}' for user ID {user_id}"
+            )
             return db_org
 
         except Exception as e:
             db.rollback()
-            logger.error(f"Failed to create organization for user {user_id}. Error: {str(e)}")
+            logger.error(
+                f"Failed to create organization for user {user_id}. Error: {str(e)}"
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="An error occurred while creating your workspace setup."
+                detail="An error occurred while creating your workspace setup.",
             )
 
     @staticmethod
@@ -116,7 +124,9 @@ class OrganizationService:
         if wallet:
             return wallet
 
-        organization = db.query(Organization).filter(Organization.id == organization_id).first()
+        organization = (
+            db.query(Organization).filter(Organization.id == organization_id).first()
+        )
         if not organization:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -152,7 +162,9 @@ class OrganizationService:
         )
 
     @staticmethod
-    def get_wallet_summary(db: Session, org: Organization, offset: int = 0, limit: int = 10) -> dict:
+    def get_wallet_summary(
+        db: Session, org: Organization, offset: int = 0, limit: int = 10
+    ) -> dict:
         wallet = OrganizationService.get_or_create_wallet(db, org.id)
 
         total_spent = sum(
@@ -196,5 +208,6 @@ class OrganizationService:
                 for transaction in transactions
             ],
         }
+
 
 organization_service = OrganizationService()

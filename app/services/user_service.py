@@ -1,22 +1,51 @@
-from datetime import datetime, timezone
 import enum
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
-
-from app.utils.currency import get_currency_by_country_code
+import requests
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
+from app.models.subscription import Subscription
 from app.models.user import User
 from app.models.wallet import Wallet
 from app.schemas.user import UserCreate, UserUpdate
-from app.models.subscription import Subscription
 
 logger = logging.getLogger(__name__)
 
+
 class UserService:
     """Service layer for user operations."""
+
+    @staticmethod
+    def resolve_location_from_ip(client_ip: str) -> dict:
+        if not client_ip or client_ip in ["127.0.0.1", "localhost", "::1"]:
+            return {}
+
+        try:
+            # Using a free GeoIP API (for production, swap with MaxMind GeoIP2 database for speed/limit reasons)
+            response = requests.get(f"http://ip-api.com/json/{client_ip}", timeout=3)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("status") == "success":
+                    city = data.get("city", "")
+                    region = data.get("regionName", "")
+                    country = data.get("country", "")
+                    currency = data.get("currency", "")
+                    country_iso = data.get("countryCode", "").lower()
+                    parts = [p for p in [city, region, country, currency, country_iso] if p]
+                    location_str = ", ".join(parts)
+
+                    return {
+                        "location": location_str,
+                        "country_iso": country_iso,
+                        "currency": currency,
+                    }
+        except Exception as e:
+            logger.error(f"Failed to resolve IP location: {e}")
+
+        return {}
 
     @staticmethod
     def get_user(db: Session, user_id: int) -> Optional[User]:
@@ -52,7 +81,10 @@ class UserService:
 
     @staticmethod
     def create_user(db: Session, user_data: UserCreate) -> User:
-        logger.debug("UserService.create_user initiated with user_data: %r", user_data.model_dump(exclude={"password"}))
+        logger.debug(
+            "UserService.create_user initiated with user_data: %r",
+            user_data.model_dump(exclude={"password"}),
+        )
 
         google_id = getattr(user_data, "google_id", None)
         linkedin_id = getattr(user_data, "linkedin_id", None)
@@ -62,18 +94,8 @@ class UserService:
         if google_id or linkedin_id or apple_id:
             email_verified_at = datetime.now(timezone.utc)
 
-        # Read country_iso from incoming payload
-        incoming_country = getattr(user_data, "country_iso", None)
-        logger.debug("Extracted incoming country_iso: %r", incoming_country)
-
-        if incoming_country:
-            detected_currency = get_currency_by_country_code(incoming_country)
-        else:
-            logger.warning("Payload missing country_iso field. Defaulting currency selection to 'gbp'.")
-            detected_currency = "gbp"
-
-        logger.info("Final currency evaluation for user registration setup: %r", detected_currency)
-
+        client_ip = getattr(user_data, "client_ip", None)
+        location_data = UserService.resolve_location_from_ip(client_ip)
 
         db_user = User(
             email=user_data.email,
@@ -81,40 +103,39 @@ class UserService:
             hashed_password=hash_password(user_data.password),
             first_name=getattr(user_data, "first_name", None),
             last_name=getattr(user_data, "last_name", None),
-            role=user_data.role.value if isinstance(user_data.role, enum.Enum) else user_data.role,
+            role=user_data.role.value
+            if isinstance(user_data.role, enum.Enum)
+            else user_data.role,
             is_active=bool(getattr(user_data, "is_active", False)),
             google_id=google_id,
             linkedin_id=linkedin_id,
             apple_id=apple_id,
             email_verified_at=email_verified_at,
-            location=getattr(user_data, "location", None),
+            location=location_data.get("location"),
         )
-        # if organization_id is provided, we should link the user to that organization
+
         if getattr(user_data, "organization_id", None):
-            logger.info("Linking user to provided organization_id: %r", user_data.organization_id)
+            logger.info(
+                "Linking user to provided organization_id: %r",
+                user_data.organization_id,
+            )
             db_user.organization_id = user_data.organization_id
 
         db.add(db_user)
         db.flush()
 
-        logger.debug("User flushed to database. Generated User ID: %r", db_user.id)
-
-        # Explicitly instantiate the wallet and print its state
-        logger.info("Instantiating Wallet with user_id=%s, currency=%s", db_user.id, detected_currency)
-        wallet = Wallet(user_id=db_user.id, currency=detected_currency)
+        wallet = Wallet(user_id=db_user.id, currency=location_data.get("currency"))
 
         db.add(wallet)
         db.commit()
-
-        # Final validation log after commit to see what actually saved
         db.refresh(db_user)
-        logger.info("Successfully registered user! DB Saved State -> wallet.currency: %r",
-                    db_user.wallet.currency if db_user.wallet else "No Wallet Found")
 
         return db_user
 
     @staticmethod
-    def update_user_social_id(db: Session, user_id: int, provider_field: str, provider_id: str) -> Optional[User]:
+    def update_user_social_id(
+        db: Session, user_id: int, provider_field: str, provider_id: str
+    ) -> Optional[User]:
         """
         Dynamically links any OAuth unique provider ID to an existing account profile.
 
@@ -122,7 +143,9 @@ class UserService:
         :param provider_id: The unique identifier string received from OAuth handshake payload
         """
         if provider_field not in ["google_id", "linkedin_id", "apple_id"]:
-            raise ValueError(f"Invalid social authentication provider field: {provider_field}")
+            raise ValueError(
+                f"Invalid social authentication provider field: {provider_field}"
+            )
 
         db_user = UserService.get_user(db, user_id)
         if not db_user:
@@ -143,7 +166,9 @@ class UserService:
         return db_user
 
     @staticmethod
-    def update_user(db: Session, user_id: int, user_update: UserUpdate) -> Optional[User]:
+    def update_user(
+        db: Session, user_id: int, user_update: UserUpdate
+    ) -> Optional[User]:
         db_user = UserService.get_user(db, user_id)
         if not db_user:
             return None
@@ -176,10 +201,13 @@ class UserService:
 
     @staticmethod
     def user_has_subscription(db: Session, org_id: int) -> bool:
-        existing = db.query(Subscription).filter(
-            Subscription.organization_id == org_id,
-            Subscription.status == "active"
-        ).first()
+        existing = (
+            db.query(Subscription)
+            .filter(
+                Subscription.organization_id == org_id, Subscription.status == "active"
+            )
+            .first()
+        )
         return existing is not None
 
     @staticmethod

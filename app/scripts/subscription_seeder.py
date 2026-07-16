@@ -36,7 +36,6 @@ def seed_subscription_plans():
         print("🔄 Connecting to database...")
         print("📦 Preparing to seed subscription plans...")
 
-        # Define the three plans (Kahoot!-like)
         plans_config = [
             {
                 "name": "Free",
@@ -52,7 +51,7 @@ def seed_subscription_plans():
                 "analytics": False,
                 "white_label": False,
                 "priority_support": False,
-                "ai_tokens": 500,  # 500 tokens/month for limited AI features
+                "ai_tokens": 500,
                 "display_order": 1,
             },
             {
@@ -69,7 +68,7 @@ def seed_subscription_plans():
                 "analytics": True,
                 "white_label": False,
                 "priority_support": False,
-                "ai_tokens": 10000,  # 10,000 tokens/month for regular AI usage
+                "ai_tokens": 10000,
                 "display_order": 2,
             },
             {
@@ -79,14 +78,14 @@ def seed_subscription_plans():
                 "price": 49.99,
                 "currency": "gbp",
                 "interval": "month",
-                "max_players": None,  # Unlimited
-                "max_arenas": None,  # Unlimited
-                "max_custom_themes": None,  # Unlimited
+                "max_players": None,
+                "max_arenas": None,
+                "max_custom_themes": None,
                 "api_access": True,
                 "analytics": True,
                 "white_label": True,
                 "priority_support": True,
-                "ai_tokens": 100000,  # 100,000 tokens/month for unlimited AI features
+                "ai_tokens": 100000, 
                 "display_order": 3,
             },
         ]

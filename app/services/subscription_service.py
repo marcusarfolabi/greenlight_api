@@ -160,10 +160,7 @@ class SubscriptionService:
                         "ai_tokens": plan.ai_tokens,
                         "max_players": plan.max_players,
                         "max_arenas": plan.max_arenas,
-                        "max_custom_themes": plan.max_custom_themes,
-                        "api_access": plan.api_access,
                         "analytics": plan.analytics,
-                        "white_label": plan.white_label,
                         "priority_support": plan.priority_support,
                         "period_end": period_end.strftime("%B %d, %Y")
                         if period_end

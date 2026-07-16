@@ -64,11 +64,9 @@ async def startup_event():
         #     else:
         #         logger.info("No tables discovered to drop.")
 
-        # Recreate tables cleanly from
         Base.metadata.create_all(bind=engine)
         seed_superadmin()
         seed_subscription_plans()
-        # logger.info("Database forcefully wiped, recreated, and seeded fresh!")
     except OperationalError as e:
         logger.error(
             f"Database connection failed on startup. {e} "
