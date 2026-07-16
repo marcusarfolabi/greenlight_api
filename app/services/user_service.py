@@ -10,6 +10,7 @@ from app.core.security import hash_password
 from app.models.subscription import Subscription
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
+from app.utils.currency import get_currency_by_country_code
 
 logger = logging.getLogger(__name__)
 
@@ -24,16 +25,20 @@ class UserService:
 
         try:
             # Using a free GeoIP API (for production, swap with MaxMind GeoIP2 database for speed/limit reasons)
-            response = requests.get(f"http://ip-api.com/json/{client_ip}", timeout=3)
+            response = requests.get(f"http://ip-api.com/json/102.204.89.110", timeout=3)
             if response.status_code == 200:
                 data = response.json()
                 if data.get("status") == "success":
                     city = data.get("city", "")
                     region = data.get("regionName", "")
                     country = data.get("country", "")
-                    currency = data.get("currency", "")
-                    country_iso = data.get("countryCode", "").lower()
-                    parts = [p for p in [city, region, country, currency, country_iso] if p]
+                    country_iso = (data.get("countryCode") or "").strip().lower()
+                    currency = (
+                        data.get("currency") or ""
+                    ).strip() or get_currency_by_country_code(country_iso.upper())
+                    parts = [
+                        p for p in [city, region, country, currency, country_iso] if p
+                    ]
                     location_str = ", ".join(parts)
 
                     return {
@@ -217,7 +222,6 @@ class UserService:
         if user is None or user.owned_organization is None:
             return None
         return user.owned_organization.id
-
 
 
 user_service = UserService()
