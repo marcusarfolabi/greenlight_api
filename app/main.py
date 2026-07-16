@@ -25,7 +25,9 @@ security = HTTPBasic()
 
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:3000",
+    "http://localhost:3001",
     "https://greenlightquiz.com",
+    "https://admin.greenlightquiz.com",
 ]
 
 
