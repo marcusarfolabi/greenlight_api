@@ -33,6 +33,7 @@ def seed_superadmin():
             f"Verifying existence of superadmin account: '{admin_username}' ({admin_email})..."
         )
 
+        # 1. Verify or Create Superadmin User
         existing_admin = (
             session.query(User)
             .filter((User.email == admin_email) | (User.username == admin_username))
@@ -63,14 +64,7 @@ def seed_superadmin():
             session.add(admin_user)
             session.flush()
 
-        existing_user_wallet = (
-            session.query(Wallet).filter(Wallet.user_id == admin_user.id).first()
-        )
-        if not existing_user_wallet:
-            admin_wallet = Wallet(user_id=admin_user.id, currency="gbp")
-            session.add(admin_wallet)
-            session.flush()
-
+        # 2. Verify or Create Organization
         admin_org_name = getattr(settings, "ADMIN_ORG_NAME", "Greenlight Platform")
         admin_org_industry = getattr(settings, "ADMIN_ORG_INDUSTRY", "platform")
 
@@ -99,30 +93,47 @@ def seed_superadmin():
             session.add(admin_org)
             session.flush()
 
+        # 3. Establish bidirectional links between User and Org
         if getattr(admin_user, "organization_id", None) != admin_org.id:
             admin_user.organization_id = admin_org.id
             session.add(admin_user)
             session.flush()
 
-        existing_org_wallet = (
-            session.query(Wallet).filter(Wallet.organization_id == admin_org.id).first()
+        # 4. Handle Wallet Setup (Unified: containing both org_id and user_id)
+        # Check if a wallet exists linked to either this user or this organization
+        existing_wallet = (
+            session.query(Wallet)
+            .filter(
+                (Wallet.user_id == admin_user.id) | (Wallet.organization_id == admin_org.id)
+            )
+            .first()
         )
-        if not existing_org_wallet:
-            existing_org_wallet = (
-                session.query(Wallet).filter(Wallet.user_id == admin_user.id).first()
-            )
 
-        if existing_org_wallet:
-            print(
-                f"Linking wallet {existing_org_wallet.id} to organization {admin_org.id}..."
-            )
-            existing_org_wallet.organization_id = admin_org.id
-            existing_org_wallet.user_id = None
-            session.add(existing_org_wallet)
+        if existing_wallet:
+            print(f"Wallet already exists (ID: {existing_wallet.id}). Verifying relations...")
+            # Ensure both relationships are bound to this existing wallet
+            updated = False
+            if existing_wallet.user_id != admin_user.id:
+                existing_wallet.user_id = admin_user.id
+                updated = True
+            if existing_wallet.organization_id != admin_org.id:
+                existing_wallet.organization_id = admin_org.id
+                updated = True
+
+            if updated:
+                session.add(existing_wallet)
+                session.flush()
         else:
-            new_org_wallet = Wallet(organization_id=admin_org.id, currency="gbp")
-            session.add(new_org_wallet)
+            print("Creating single, unified wallet for Superadmin User and Organization...")
+            admin_wallet = Wallet(
+                user_id=admin_user.id,
+                organization_id=admin_org.id,
+                currency="gbp"
+            )
+            session.add(admin_wallet)
+            session.flush()
 
+        # 5. Handle Subscription Plans
         default_plan = (
             session.query(SubscriptionPlan)
             .filter(SubscriptionPlan.plan_type == SubscriptionPlanType.PRO)
