@@ -18,8 +18,7 @@ class OrganizationCreate(OrganizationBase):
 
 
 class OrganizationUpdate(BaseModel):
-    name: Optional[str] = None
-    subdomain: Optional[str] = None
+    name: Optional[str] = None 
     industry: Optional[str] = None
     is_verified: Optional[bool] = None
     city: Optional[str] = None

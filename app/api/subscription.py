@@ -112,9 +112,6 @@ def generate_auth_payload(db: Session, user_id: int) -> dict:
         "hasSub": has_sub,
     }
 
-    if has_org:
-        user_data["subdomain"] = UserService.user_sub_domain(db, user.id)
-
     return {"access_token": access_token, "token_type": "bearer", "user": user_data}
 
 

@@ -15,11 +15,6 @@ logger = logging.getLogger(__name__)
 class OrganizationService:
     """Service layer for organization and host onboarding."""
 
-    @staticmethod
-    def get_by_subdomain(db: Session, subdomain: str) -> Organization | None:
-        return (
-            db.query(Organization).filter(Organization.subdomain == subdomain).first()
-        )
 
     @staticmethod
     def get_by_owner(db: Session, owner_id: int) -> Organization | None:
@@ -81,7 +76,7 @@ class OrganizationService:
             db.add(db_org)
             db.flush()
 
-            location_text = org_data.location or user.location or ""
+            location_text = user.location or ""
             currency_code = OrganizationService.extract_currency_from_location(
                 location_text
             )
@@ -89,7 +84,7 @@ class OrganizationService:
             wallet = Wallet(
                 organization_id=db_org.id,
                 user_id=user_id,
-                currency=currency_code or "GBP",
+                currency=currency_code or "gbp",
             )
             db.add(wallet)
 

@@ -146,12 +146,6 @@ async def setup_host_organization(
             status_code=status.HTTP_404_NOT_FOUND, detail="User account not found."
         )
 
-    if OrganizationService.get_by_subdomain(db, org_data.subdomain):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Organization workspace subdomain already taken",
-        )
-
     # Create the new organization
     new_org = OrganizationService.create_organization_for_user(
         db=db, user_id=auth.user_id, org_data=org_data
@@ -179,7 +173,6 @@ async def setup_host_organization(
         "hasOrg": True,
         "org_id": new_org.id,
         "hasSub": hasSub,
-        "subdomain": new_org.subdomain
     }
 
     # Return everything explicitly via JSON

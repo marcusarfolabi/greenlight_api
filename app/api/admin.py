@@ -253,7 +253,6 @@ async def list_organizations_with_subscription(
             "organization": {
                 "id": org.id,
                 "name": org.name,
-                "subdomain": org.subdomain,
                 "industry": org.industry,
                 "created_at": org.created_at,
                 "updated_at": org.updated_at,

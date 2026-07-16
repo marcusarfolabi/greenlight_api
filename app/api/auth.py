@@ -52,7 +52,7 @@ async def login(
     if not user or not verify_password(password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username/email or password",
+            detail="Opps! Try again with correct username/email and password.",
         )
 
     # debug: log is_active value to diagnose truthiness issues
@@ -109,10 +109,6 @@ async def login(
             "hasSub": hasSub,
         },
     }
-
-    if hasOrg:
-        subdomain = UserService.user_sub_domain(db, user.id)
-        response_data["user"]["subdomain"] = subdomain
 
     return response_data
 
@@ -270,11 +266,6 @@ async def auth_google(
 
             },
         }
-
-        if hasOrg:
-            response_data["user"]["subdomain"] = UserService.user_sub_domain(
-                db, user.id
-            )
 
         return response_data
 
@@ -475,10 +466,6 @@ async def auth_linkedin(
 
         },
     }
-
-    if hasOrg:
-        response_data["user"]["subdomain"] = UserService.user_sub_domain(db, user.id)
-
     return response_data
 
 
