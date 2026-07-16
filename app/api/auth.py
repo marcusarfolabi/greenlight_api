@@ -1,10 +1,8 @@
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
-from fastapi import Request  # Import Request
-
 import requests
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, status
+from fastapi import APIRouter, Request, BackgroundTasks, Depends, Form, HTTPException, status
 from fastapi.responses import JSONResponse
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
@@ -23,7 +21,6 @@ from app.core.security import (
 from app.db.session import get_db
 from app.models.user import PushSubscription
 from app.schemas.user import (
-    AppleTokenPayload,
     AuthContext,
     ForgotPasswordRequest,
     GoogleTokenPayload,

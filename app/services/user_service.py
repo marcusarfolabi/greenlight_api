@@ -25,7 +25,7 @@ class UserService:
 
         try:
             # Using a free GeoIP API (for production, swap with MaxMind GeoIP2 database for speed/limit reasons)
-            response = requests.get(f"http://ip-api.com/json/102.204.89.110", timeout=3)
+            response = requests.get(f"http://ip-api.com/json/{client_ip}", timeout=3)
             if response.status_code == 200:
                 data = response.json()
                 if data.get("status") == "success":

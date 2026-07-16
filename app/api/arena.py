@@ -6,9 +6,9 @@ import secrets
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
-
 from fastapi import (
     APIRouter,
+    Request,
     BackgroundTasks,
     Body,
     Depends,
@@ -26,13 +26,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.cache import otp_cache
-from app.core.security import get_current_user, hash_password
+from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.arena import Arena, ArenaTokenUsageLog, Question
 from app.models.organization import ArenaPayoutReport
 from app.models.player import Player, PlayerAnswerScore, PlayerBankingProfile
 from app.models.user import PayoutProfile, User
-from app.models.wallet import Wallet
 from app.schemas.arena import (
     AIQuestionGenerationRequest,
     ArenaCreate,
@@ -51,13 +50,14 @@ from app.schemas.player import (
     PlayerResponse,
     PlayerScoreboardResponse,
 )
-from app.schemas.user import AuthContext
+from app.schemas.user import AuthContext, UserCreate
 from app.services.ai_question_service import AIQuestionGenerationService
 from app.services.mail_service import MailService
 from app.services.token_service import TokenService
 from app.services.twilio_service import TwilioService
 from app.services.upload_service import parse_questions_file
 from app.services.ws_manager import ws_manager
+from app.services.user_service import UserService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -912,6 +912,7 @@ async def validate_access_code(
 )
 async def save_player_banking_profile(
     player_id: int,
+    request: Request,
     data: PlayerBankingProfileCreate,
     db: Session = Depends(get_db),
 ):
@@ -980,38 +981,30 @@ async def save_player_banking_profile(
             username_seed = _username_seed_from_player_name(player.username)
             unique_username = _generate_unique_username(db, username_seed)
 
-            org_wallet = (
-                db.query(Wallet)
-                .filter(Wallet.organization_id == player.organization_id)
-                .first()
-            )
-            wallet_currency = (
-                org_wallet.currency.lower()
-                if org_wallet and org_wallet.currency
-                else "gbp"
-            )
-
-            target_user = User(
+            target_user = UserCreate(
                 username=unique_username,
                 email=normalized_email,
-                hashed_password=hash_password(secrets.token_urlsafe(24)),
+                password=secrets.token_urlsafe(24),
                 first_name=data.account_holder_name,
                 phone_number=data.phone_number,
                 role="user",
                 is_active=False,
-                organization_id=player.organization_id,
+                organization_id=str(player.organization_id),
+                accepted_terms=True,
             )
-            db.add(target_user)
-            db.flush()
+            client_ip = request.headers.get("CF-Connecting-IP") or \
+                            request.headers.get("X-Forwarded-For") or \
+                            request.client.host
+            target_user.client_ip = client_ip
 
-            db.add(Wallet(user_id=target_user.id, currency=wallet_currency))
+            user = UserService.create_user(db, target_user)
             db.commit()
-            db.refresh(target_user)
+            db.refresh(user)
 
             logger.info(
                 "Created payout-onboarding user %s (%s) for player %s",
-                target_user.id,
-                target_user.email,
+                user.id,
+                user.email,
                 player.id,
             )
         else:
@@ -1025,7 +1018,7 @@ async def save_player_banking_profile(
 
         otp_code = f"{secrets.randbelow(9000) + 1000}"
         expire = datetime.utcnow() + timedelta(minutes=15)
-        otp_cache.set_otp(email=target_user.email, otp=otp_code, expires_at=expire)
+        otp_cache.set_otp(email=user.email, otp=otp_code, expires_at=expire)
 
         arena_for_onboarding = db.query(Arena).filter(Arena.id == player.arena_id).first()
         onboarding_arena_name = (
@@ -1035,11 +1028,11 @@ async def save_player_banking_profile(
         )
 
         await MailService.send_payout_onboarding_email(
-            email=target_user.email,
+            email=user.email,
             name=(
-                target_user.first_name
+                user.first_name
                 or data.account_holder_name
-                or target_user.username
+                or user.username
                 or "Player"
             ),
             otp=otp_code,
@@ -1048,18 +1041,18 @@ async def save_player_banking_profile(
         )
         logger.info(
             "Sent payout setup email to %s for player %s",
-            target_user.email,
+            user.email,
             player.id,
         )
 
         payout_profile = (
             db.query(PayoutProfile)
-            .filter(PayoutProfile.user_id == target_user.id)
+            .filter(PayoutProfile.user_id == user.id)
             .first()
         )
         if not payout_profile:
             payout_profile = PayoutProfile(
-                user_id=target_user.id,
+                user_id=user.id,
                 bank_name=(data.bank_code or "Unknown").strip() or "Unknown",
                 account_holder_name=data.account_holder_name,
                 account_number=(data.account_number or "").strip(),
@@ -2196,13 +2189,6 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                             arena_id=arena.id, db=db
                         )
 
-                        # try:
-                        #     await _notify_superadmins_payout_ready(arena=arena, db=db)
-                        # except Exception:
-                        #     logger.exception(
-                        #         "Failed payout-ready superadmin notification for arena %s",
-                        #         arena.id,
-                        #     )
 
                         await ws_manager.broadcast(
                             str(arena.access_code),
