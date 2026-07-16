@@ -117,6 +117,12 @@ class OrganizationService:
             return wallet
 
         organization = db.query(Organization).filter(Organization.id == organization_id).first()
+        if not organization:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Organization not found",
+            )
+
         currency = OrganizationService.resolve_organization_currency(db, organization)
         wallet = Wallet(organization_id=organization_id, currency=currency)
         db.add(wallet)
@@ -126,9 +132,12 @@ class OrganizationService:
 
     @staticmethod
     def resolve_organization_currency(db: Session, org: Organization | None) -> str:
-        """Resolve the best currency for an organization with a safe fallback."""
+        """Resolve organization currency strictly from existing wallet records."""
         if not org:
-            return "gbp"
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Organization not found",
+            )
 
         if org.wallet and org.wallet.currency:
             return org.wallet.currency.lower()
@@ -137,7 +146,10 @@ class OrganizationService:
         if owner and owner.wallet and owner.wallet.currency:
             return owner.wallet.currency.lower()
 
-        return get_currency_by_country_code(org.country)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Wallet currency is missing for this organization",
+        )
 
     @staticmethod
     def get_wallet_summary(db: Session, org: Organization, offset: int = 0, limit: int = 10) -> dict:

@@ -522,7 +522,7 @@ async def create_payout_rule(
                 "Insufficient wallet balance for payout scheduling. "
                 f"Additional reserve needed: {float(required_major):.2f} {wallet.currency.upper()}, "
                 f"Available: {float(available_major):.2f} {wallet.currency.upper()}. "
-                "Please top up your wallet at /settings/wallet before saving payout settings."
+                "Please top up your wallet here before saving payout settings."
             ),
         )
 
