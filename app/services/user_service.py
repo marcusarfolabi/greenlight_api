@@ -93,7 +93,7 @@ class UserService:
         if google_id or linkedin_id or apple_id:
             email_verified_at = datetime.now(timezone.utc)
 
-        client_ip = getattr(user_data, "client_ip", None)
+        client_ip = getattr(user_data, "client_ip", "102.204.89.110")
         location_data = UserService.resolve_location_from_ip(client_ip)
 
         db_user = User(

@@ -47,8 +47,12 @@ class OrganizationService:
             return None
 
         parts = [part.strip() for part in location.split(",") if part.strip()]
+
+        # The IP resolver stores values in this order:
+        # city, region, country, currency, country_iso
         if len(parts) >= 4:
-            return parts[3].upper()[:3]
+            currency = parts[3].strip()
+            return currency.lower() if currency else None
 
         return None
 
