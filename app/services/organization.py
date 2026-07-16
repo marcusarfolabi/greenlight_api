@@ -8,7 +8,6 @@ from app.models.organization import Organization
 from app.models.user import User
 from app.models.wallet import Transaction, Wallet
 from app.schemas.organization import OrganizationCreate, OrgSettingsResponse
-from app.utils.currency import get_currency_by_country_code
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +47,17 @@ class OrganizationService:
         return None, None, parts[0]
 
     @staticmethod
+    def extract_currency_from_location(location: str) -> Optional[str]:
+        if not location:
+            return None
+
+        parts = [part.strip() for part in location.split(",") if part.strip()]
+        if len(parts) >= 4:
+            return parts[3].upper()[:3]
+
+        return None
+
+    @staticmethod
     def create_organization_for_user(
         db: Session, user_id: int, org_data: OrganizationCreate
     ) -> Organization:
@@ -71,21 +81,17 @@ class OrganizationService:
             db.add(db_org)
             db.flush()
 
-            wallet = user.wallet
-            if wallet is None:
-                wallet = db.query(Wallet).filter(Wallet.user_id == user.id).first()
+            location_text = org_data.location or user.location or ""
+            currency_code = OrganizationService.extract_currency_from_location(
+                location_text
+            )
 
-            if wallet is None:
-                wallet = (
-                    db.query(Wallet).filter(Wallet.organization_id == db_org.id).first()
-                )
-
-            if wallet is None:
-                wallet = Wallet(organization_id=db_org.id, currency="gbp")
-                db.add(wallet)
-            else:
-                wallet.organization_id = db_org.id
-                wallet.user_id = None
+            wallet = Wallet(
+                organization_id=db_org.id,
+                user_id=user_id,
+                currency=currency_code or "GBP",
+            )
+            db.add(wallet)
 
             db.commit()
 
@@ -158,10 +164,14 @@ class OrganizationService:
         if owner and owner.wallet and owner.wallet.currency:
             return owner.wallet.currency.lower()
 
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Wallet currency is missing for this organization",
-        )
+        if owner and owner.location:
+            currency_code = OrganizationService.extract_currency_from_location(
+                owner.location
+            )
+            if currency_code:
+                return currency_code.lower()
+
+        return "gbp"
 
     @staticmethod
     def get_wallet_summary(
