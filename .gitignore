@@ -21,4 +21,4 @@ start-local.ps1
 note.txt
 Dockerfile.local.env.docker
 .env.docker
-docker-compose*
+docker-compose.yml
