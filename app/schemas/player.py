@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -8,38 +7,37 @@ class PlayerCreate(BaseModel):
     arena_id: str
     organization_id: int
     arena_access_code: int
-    session_id: Optional[str] = None
-    username: Optional[str] = None
-    attempt_date: Optional[datetime] = None
-    status: Optional[str] = "joined"
-    completed_at: Optional[datetime] = None
-    score: Optional[int] = None
-    answers_submitted: Optional[int] = None
-    correct_answers: Optional[int] = None
+    session_id: str | None = None
+    username: str | None = None
+    attempt_date: datetime | None = None
+    status: str | None = "joined"
+    completed_at: datetime | None = None
+    score: int | None = None
+    answers_submitted: int | None = None
+    correct_answers: int | None = None
 
 
 class PlayerResponse(PlayerCreate):
-    id: Optional[int] = None
-    rank: Optional[int] = None
-    arena_name: Optional[str] = None
-    total_players: Optional[int] = None
+    id: int | None = None
+    rank: int | None = None
+    arena_name: str | None = None
+    total_players: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class LobbyPlayer(BaseModel):
-    id: Optional[int] = None
-    username: Optional[str] = None
-    joined_at: Optional[datetime] = None
+    id: int | None = None
+    username: str | None = None
+    joined_at: datetime | None = None
 
 
 class LobbyResponse(BaseModel):
     players: list[LobbyPlayer]
     total_players: int
     lobby_waiting_time: int = 30
-    arena_name: Optional[str] = None
-    arena_access_code: Optional[int] = None
-    
+    arena_name: str | None = None
+    arena_access_code: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -65,14 +63,15 @@ class PlayerAnswerScoreResponse(PlayerAnswerScoreCreate):
 
 class PlayerScoreboardResponse(BaseModel):
     """Player score info for leaderboard display"""
+
     player_id: int
-    username: Optional[str] = None
+    username: str | None = None
     total_score: int
     answers_correct: int
     answers_total: int
     accuracy_percentage: float
-    rank: Optional[int] = None
-    last_answered_at: Optional[datetime] = None
+    rank: int | None = None
+    last_answered_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -80,16 +79,16 @@ class PlayerScoreboardResponse(BaseModel):
 class PlayerBankingProfileCreate(BaseModel):
     account_holder_name: str
     email: str
-    phone_number: Optional[str] = None
-    routing_number: Optional[str] = None
-    account_number: Optional[str] = None
-    bank_code: Optional[str] = None
-    payout_method: Optional[str] = "bank_transfer"
+    phone_number: str | None = None
+    routing_number: str | None = None
+    account_number: str | None = None
+    bank_code: str | None = None
+    payout_method: str | None = "bank_transfer"
     create_account: bool = False
 
 
 class PlayerBankingProfileResponse(PlayerBankingProfileCreate):
-    id: Optional[int] = None
-    player_id: Optional[int] = None
+    id: int | None = None
+    player_id: int | None = None
 
     model_config = ConfigDict(from_attributes=True)

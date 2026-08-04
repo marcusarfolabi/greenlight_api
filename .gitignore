@@ -19,4 +19,5 @@ node_modules
 docker-compose.local.yml
 start-local.ps1
 note.txt 
-Dockerfile.local
+Dockerfile.local.env.docker
+.env.docker

@@ -104,13 +104,16 @@ def seed_superadmin():
         existing_wallet = (
             session.query(Wallet)
             .filter(
-                (Wallet.user_id == admin_user.id) | (Wallet.organization_id == admin_org.id)
+                (Wallet.user_id == admin_user.id)
+                | (Wallet.organization_id == admin_org.id)
             )
             .first()
         )
 
         if existing_wallet:
-            print(f"Wallet already exists (ID: {existing_wallet.id}). Verifying relations...")
+            print(
+                f"Wallet already exists (ID: {existing_wallet.id}). Verifying relations..."
+            )
             # Ensure both relationships are bound to this existing wallet
             updated = False
             if existing_wallet.user_id != admin_user.id:
@@ -124,11 +127,11 @@ def seed_superadmin():
                 session.add(existing_wallet)
                 session.flush()
         else:
-            print("Creating single, unified wallet for Superadmin User and Organization...")
+            print(
+                "Creating single, unified wallet for Superadmin User and Organization..."
+            )
             admin_wallet = Wallet(
-                user_id=admin_user.id,
-                organization_id=admin_org.id,
-                currency="gbp"
+                user_id=admin_user.id, organization_id=admin_org.id, currency="gbp"
             )
             session.add(admin_wallet)
             session.flush()

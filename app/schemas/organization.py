@@ -1,16 +1,16 @@
 from datetime import datetime
-from typing import Optional, List
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class OrganizationBase(BaseModel):
     name: str
     industry: str
-    capped_tokens: Optional[int] = None
+    capped_tokens: int | None = None
 
 
 class OrganizationCreate(OrganizationBase):
-    owner_id: Optional[int] = None
+    owner_id: int | None = None
     first_name: str
     last_name: str
     phone_number: str
@@ -18,12 +18,12 @@ class OrganizationCreate(OrganizationBase):
 
 
 class OrganizationUpdate(BaseModel):
-    name: Optional[str] = None 
-    industry: Optional[str] = None
-    is_verified: Optional[bool] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    country: Optional[str] = None
+    name: str | None = None
+    industry: str | None = None
+    is_verified: bool | None = None
+    city: str | None = None
+    state: str | None = None
+    country: str | None = None
 
 
 class OrganizationResponse(OrganizationBase):
@@ -38,14 +38,15 @@ class OrganizationResponse(OrganizationBase):
 
 # ============ ORGANIZATION SETTINGS SCHEMAS ============
 
+
 class PayoutRuleCreate(BaseModel):
     position: str = Field(..., description="Position tier (1st, 2nd, 3rd, top_5, etc.)")
     amount: float = Field(..., description="Payout amount in dollars")
 
 
 class PayoutRuleUpdate(BaseModel):
-    position: Optional[str] = None
-    amount: Optional[float] = None
+    position: str | None = None
+    amount: float | None = None
 
 
 class PayoutRuleResponse(PayoutRuleCreate):
@@ -59,7 +60,7 @@ class PayoutRuleResponse(PayoutRuleCreate):
 
 class StripeConnectStatus(BaseModel):
     connected: bool = False
-    stripe_connect_id: Optional[str] = None
+    stripe_connect_id: str | None = None
     charges_enabled: bool = False
     payouts_enabled: bool = False
     details_submitted: bool = False
@@ -72,35 +73,57 @@ class StripeOnboardingResponse(BaseModel):
 
 
 class OrgBrandingSettings(BaseModel):
-    brand_color: str = Field(default="#10B981", description="Hex color code for branding")
+    brand_color: str = Field(
+        default="#10B981", description="Hex color code for branding"
+    )
 
 
 class OrgVisibilitySettings(BaseModel):
-    show_leaderboard: bool = Field(default=True, description="Show live leaderboard to players")
-    show_final_podium: bool = Field(default=True, description="Display top 3 winners with celebrations")
-    engagement_overlays: bool = Field(default=True, description="Show polls and reactions during game")
+    show_leaderboard: bool = Field(
+        default=True, description="Show live leaderboard to players"
+    )
+    show_final_podium: bool = Field(
+        default=True, description="Display top 3 winners with celebrations"
+    )
+    engagement_overlays: bool = Field(
+        default=True, description="Show polls and reactions during game"
+    )
     is_public: bool = Field(default=False, description="Make arena resources public")
-    timer_enabled: bool = Field(default=True, description="Add countdown timer to questions")
-    waiting_lobby: bool = Field(default=True, description="Hold players in waiting room before start")
+    timer_enabled: bool = Field(
+        default=True, description="Add countdown timer to questions"
+    )
+    waiting_lobby: bool = Field(
+        default=True, description="Hold players in waiting room before start"
+    )
 
 
 class OrgArenaSettings(BaseModel):
-    use_ai_for_arenas: bool = Field(default=True, description="Enable AI-powered arena question generation and token usage")
+    use_ai_for_arenas: bool = Field(
+        default=True,
+        description="Enable AI-powered arena question generation and token usage",
+    )
 
 
 class OrgPayoutSettings(BaseModel):
     enable_payouts: bool = Field(default=False, description="Enable financial payouts")
-    request_payout_details: bool = Field(default=True, description="Request payout details from winners")
-    payout_method: str = Field(default="stripe", description="Payout method (stripe or bank)")
-    payout_rules: List[PayoutRuleCreate] = Field(default=[], description="Reward tiers and amounts")
+    request_payout_details: bool = Field(
+        default=True, description="Request payout details from winners"
+    )
+    payout_method: str = Field(
+        default="stripe", description="Payout method (stripe or bank)"
+    )
+    payout_rules: list[PayoutRuleCreate] = Field(
+        default=[], description="Reward tiers and amounts"
+    )
 
 
 class OrgSettingsUpdate(BaseModel):
     """Complete organization settings update schema"""
-    branding: Optional[OrgBrandingSettings] = None
-    visibility: Optional[OrgVisibilitySettings] = None
-    arena: Optional[OrgArenaSettings] = None
-    payouts: Optional[OrgPayoutSettings] = None
+
+    branding: OrgBrandingSettings | None = None
+    visibility: OrgVisibilitySettings | None = None
+    arena: OrgArenaSettings | None = None
+    payouts: OrgPayoutSettings | None = None
 
 
 class WalletTransactionResponse(BaseModel):
@@ -109,26 +132,29 @@ class WalletTransactionResponse(BaseModel):
     id: int
     amount: int
     type: str
-    description: Optional[str] = None
+    description: str | None = None
     status: str
-    stripe_reference: Optional[str] = None
+    stripe_reference: str | None = None
     created_at: datetime
 
 
 class WalletSummaryResponse(BaseModel):
     balance: int = Field(..., description="Available balance in cents")
     total_spent: int = Field(..., description="Total spent in cents")
-    pending_withheld: int = Field(..., description="Pending or withheld amount in cents")
+    pending_withheld: int = Field(
+        ..., description="Pending or withheld amount in cents"
+    )
     currency: str = "usd"
-    stripe_connect_id: Optional[str] = None
+    stripe_connect_id: str | None = None
     offset: int = 0
     limit: int = 10
     has_more: bool = False
-    transactions: List[WalletTransactionResponse] = Field(default_factory=list)
+    transactions: list[WalletTransactionResponse] = Field(default_factory=list)
 
 
 class OrgSettingsResponse(BaseModel):
     """Complete organization settings response"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -150,18 +176,19 @@ class OrgSettingsResponse(BaseModel):
     enable_payouts: bool
     request_payout_details: bool
     payout_method: str
-    payout_rules: List[PayoutRuleResponse]
+    payout_rules: list[PayoutRuleResponse]
 
 
 class OrgSettingsSaveResponse(OrgSettingsResponse):
     """Returned after saving settings; may include a Stripe onboarding redirect URL."""
-    # stripe_onboarding_url: Optional[str] = None
 
 
 # ===== Wallet Top-up Schemas
 class CreateTopUpRequest(BaseModel):
     amount: float = Field(..., description="Top-up amount in dollars")
-    currency: Optional[str] = Field(None, description="ISO currency code (e.g. 'usd', 'gbp')")
+    currency: str | None = Field(
+        None, description="ISO currency code (e.g. 'usd', 'gbp')"
+    )
 
 
 class CreateTopUpResponse(BaseModel):

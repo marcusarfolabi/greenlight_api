@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, model_validator
 
@@ -39,23 +38,23 @@ class TokenRefreshRequest(BaseModel):
 
 class GoogleTokenPayload(BaseModel):
     token: str
-    role: Optional[UserRole] = None
-    location: Optional[str] = None
-    country_iso: Optional[str] = None
+    role: UserRole | None = None
+    location: str | None = None
+    country_iso: str | None = None
 
 
 class AppleTokenPayload(BaseModel):
     token: str
-    role: Optional[UserRole] = None
-    location: Optional[str] = None
-    country_iso: Optional[str] = None
+    role: UserRole | None = None
+    location: str | None = None
+    country_iso: str | None = None
 
 
 class LinkedInTokenPayload(BaseModel):
     code: str
-    role: Optional[UserRole] = None
-    location: Optional[str] = None
-    country_iso: Optional[str] = None
+    role: UserRole | None = None
+    location: str | None = None
+    country_iso: str | None = None
 
 
 class UserBase(BaseModel):
@@ -66,18 +65,18 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
     role: str = "user"
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    phone_number: Optional[str] = None
-    organization_id: Optional[str] = None
-    is_active: Optional[bool] = False
-    google_id: Optional[str] = None
-    linkedin_id: Optional[str] = None
-    apple_id: Optional[str] = None
-    location: Optional[str] = None
-    country_iso: Optional[str] = None
+    first_name: str | None = None
+    last_name: str | None = None
+    phone_number: str | None = None
+    organization_id: str | None = None
+    is_active: bool | None = False
+    google_id: str | None = None
+    linkedin_id: str | None = None
+    apple_id: str | None = None
+    location: str | None = None
+    country_iso: str | None = None
     accepted_terms: bool = False
-    client_ip: Optional[str] = None
+    client_ip: str | None = None
 
     @model_validator(mode="after")
     def validate_terms_acceptance(self) -> "UserCreate":
@@ -98,15 +97,15 @@ class UserOrgCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    username: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    phone_number: Optional[str] = None
-    email: Optional[EmailStr] = None
-    avatar: Optional[str] = None
-    location: Optional[str] = None
-    is_active: Optional[bool] = None
-    password: Optional[str] = None
+    username: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    phone_number: str | None = None
+    email: EmailStr | None = None
+    avatar: str | None = None
+    location: str | None = None
+    is_active: bool | None = None
+    password: str | None = None
 
 
 class UserResponse(UserBase):
@@ -116,16 +115,16 @@ class UserResponse(UserBase):
     role: UserRole
     is_active: bool
     created_at: datetime
-    owned_organization: Optional[OrganizationResponse] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    phone_number: Optional[str] = None
-    avatar: Optional[str] = None
+    owned_organization: OrganizationResponse | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    phone_number: str | None = None
+    avatar: str | None = None
     username: str
     email: EmailStr
-    google_id: Optional[str] = None
-    linkedin_id: Optional[str] = None
-    apple_id: Optional[str] = None
+    google_id: str | None = None
+    linkedin_id: str | None = None
+    apple_id: str | None = None
 
 
 class Token(BaseModel):
@@ -143,9 +142,9 @@ class Token(BaseModel):
 
 class PushSubscriptionCreate(BaseModel):
     fcm_token: str
-    device_type: Optional[str] = "fcm"
-    device_meta: Optional[dict] = None
+    device_type: str | None = "fcm"
+    device_meta: dict | None = None
 
 
 class TokenPayload(BaseModel):
-    sub: Optional[str] = None
+    sub: str | None = None

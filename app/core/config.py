@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import List, Optional
 
 from fastapi_mail import ConnectionConfig
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,7 +22,7 @@ class Settings(BaseSettings):
     LINKEDIN_REDIRECT_URI: str = ""
     ENVIRONMENT: str = "development"
 
-    CORS_ORIGINS: List[str] = ["*"]
+    CORS_ORIGINS: list[str] = ["*"]
     RESEND_API_KEY: str = ""
     RESEND_FROM_EMAIL: str = "hello@send.greenlightquiz.com"
 

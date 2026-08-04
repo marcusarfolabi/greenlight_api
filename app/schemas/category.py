@@ -1,10 +1,10 @@
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional
 from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CategoryCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100) 
+    name: str = Field(..., min_length=1, max_length=100)
 
 
 class CategoryUpdate(BaseModel):
@@ -12,7 +12,7 @@ class CategoryUpdate(BaseModel):
 
 
 class CategorySchema(BaseModel):
-    id: Optional[int] = None
+    id: int | None = None
     name: str
     slug: str
     org_id: int

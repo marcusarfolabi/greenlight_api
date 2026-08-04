@@ -1,7 +1,8 @@
-from pydantic import BaseModel
-from typing import Optional
 from datetime import datetime
 from enum import Enum
+
+from pydantic import BaseModel
+
 
 class CreatePaymentIntentRequest(BaseModel):
     organization_id: int
@@ -39,6 +40,8 @@ class TokenPurchaseQuoteResponse(BaseModel):
     token_amount: int
     cost: float
     currency: str
+
+
 class SubscriptionPlanTypeSchema(str, Enum):
     FREE = "free"
     STANDARD = "standard"
@@ -51,9 +54,9 @@ class SubscriptionPlanBase(BaseModel):
     price: float
     currency: str
     interval: str
-    max_players: Optional[int] = None
-    max_arenas: Optional[int] = None
-    max_custom_themes: Optional[int] = None
+    max_players: int | None = None
+    max_arenas: int | None = None
+    max_custom_themes: int | None = None
     api_access: bool = False
     analytics: bool = False
     white_label: bool = False
@@ -63,33 +66,33 @@ class SubscriptionPlanBase(BaseModel):
 
 class SubscriptionPlanCreate(SubscriptionPlanBase):
     plan_type: SubscriptionPlanTypeSchema
-    stripe_product_id: Optional[str] = None
-    stripe_price_id: Optional[str] = None
+    stripe_product_id: str | None = None
+    stripe_price_id: str | None = None
     display_order: int = 0
     ai_tokens: int = 0
 
 
 class SubscriptionPlanUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    price: Optional[float] = None
-    max_players: Optional[int] = None
-    max_arenas: Optional[int] = None
-    api_access: Optional[bool] = None
-    analytics: Optional[bool] = None
-    white_label: Optional[bool] = None
-    priority_support: Optional[bool] = None
-    ai_tokens: Optional[int] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    description: str | None = None
+    price: float | None = None
+    max_players: int | None = None
+    max_arenas: int | None = None
+    api_access: bool | None = None
+    analytics: bool | None = None
+    white_label: bool | None = None
+    priority_support: bool | None = None
+    ai_tokens: int | None = None
+    is_active: bool | None = None
 
 
 class SubscriptionPlanResponse(SubscriptionPlanBase):
     id: int
     plan_type: SubscriptionPlanTypeSchema
-    stripe_product_id: Optional[str] = None
-    stripe_price_id: Optional[str] = None
-    converted_price: Optional[float] = None
-    converted_currency: Optional[str] = None
+    stripe_product_id: str | None = None
+    stripe_price_id: str | None = None
+    converted_price: float | None = None
+    converted_currency: str | None = None
     is_active: bool
     display_order: int
     created_at: datetime
@@ -106,18 +109,18 @@ class SubscriptionBase(BaseModel):
 
 
 class SubscriptionCreate(SubscriptionBase):
-    stripe_subscription_id: Optional[str] = None
-    stripe_customer_id: Optional[str] = None
+    stripe_subscription_id: str | None = None
+    stripe_customer_id: str | None = None
 
 
 class SubscriptionResponse(SubscriptionBase):
     id: int
-    stripe_subscription_id: Optional[str] = None
-    stripe_customer_id: Optional[str] = None
+    stripe_subscription_id: str | None = None
+    stripe_customer_id: str | None = None
     started_at: datetime
-    canceled_at: Optional[datetime] = None
-    current_period_start: Optional[datetime] = None
-    current_period_end: Optional[datetime] = None
+    canceled_at: datetime | None = None
+    current_period_start: datetime | None = None
+    current_period_end: datetime | None = None
     created_at: datetime
     updated_at: datetime
     plan: SubscriptionPlanResponse
@@ -128,21 +131,22 @@ class SubscriptionResponse(SubscriptionBase):
 
 class SubscriptionWithPlanDetails(SubscriptionResponse):
     """Subscription response with full plan details"""
-    pass
 
 
 from typing import Any
 
+
 # 1. This handles the subscription database conversion cleanly
 class SubscriptionPayloadResponse(SubscriptionBase):
     id: int
-    stripe_subscription_id: Optional[str] = None
-    stripe_customer_id: Optional[str] = None
+    stripe_subscription_id: str | None = None
+    stripe_customer_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
 
 # 2. This matches your composite controller return dictionary
 class SubscriptionAuthWrapperResponse(BaseModel):

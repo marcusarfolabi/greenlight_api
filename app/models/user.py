@@ -12,7 +12,6 @@ from .base import Base
 if TYPE_CHECKING:
     from .organization import Organization
 
-
 class UserRole(enum.Enum):
     USER = "user"
     HOST = "host"
@@ -26,19 +25,19 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
-    first_name: Mapped[Optional[str]] = mapped_column(String(255))
-    last_name: Mapped[Optional[str]] = mapped_column(String(255))
-    phone_number: Mapped[Optional[str]] = mapped_column(String(255))
-    avatar: Mapped[Optional[str]] = mapped_column(String(255))
-    location: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(255))
+    last_name: Mapped[str | None] = mapped_column(String(255))
+    phone_number: Mapped[str | None] = mapped_column(String(255))
+    avatar: Mapped[str | None] = mapped_column(String(255))
+    location: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    google_id: Mapped[Optional[str]] = mapped_column(String(255))
-    linkedin_id: Mapped[Optional[str]] = mapped_column(String(255))
-    apple_id: Mapped[Optional[str]] = mapped_column(String(255))
+    google_id: Mapped[str | None] = mapped_column(String(255))
+    linkedin_id: Mapped[str | None] = mapped_column(String(255))
+    apple_id: Mapped[str | None] = mapped_column(String(255))
 
     role: Mapped[str] = mapped_column(String(50), default="user")
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    email_verified_at: Mapped[Optional[datetime]] = mapped_column(
+    email_verified_at: Mapped[datetime | None] = mapped_column(
         nullable=True, default=None
     )
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
@@ -46,7 +45,7 @@ class User(Base):
         insert_default=func.now(), onupdate=func.now()
     )
 
-    organization_id: Mapped[Optional[int]] = mapped_column(
+    organization_id: Mapped[int | None] = mapped_column(
         ForeignKey("organizations.id"), nullable=True
     )
 
@@ -84,8 +83,8 @@ class PayoutProfile(Base):
     bank_name: Mapped[str] = mapped_column(String(100))
     account_holder_name: Mapped[str] = mapped_column(String(100))
     account_number: Mapped[str] = mapped_column(String(50))
-    sort_code: Mapped[Optional[str]] = mapped_column(String(20))
-    iban: Mapped[Optional[str]] = mapped_column(String(50))
+    sort_code: Mapped[str | None] = mapped_column(String(20))
+    iban: Mapped[str | None] = mapped_column(String(50))
 
     user: Mapped["User"] = relationship(back_populates="payout_profile")
 
@@ -94,11 +93,11 @@ class PushSubscription(Base):
     __tablename__ = "push_subscriptions"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    fcm_token: Mapped[Optional[str]] = mapped_column(
+    fcm_token: Mapped[str | None] = mapped_column(
         String(255), unique=True, nullable=True
     )
-    device_type: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    device_meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    device_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    device_meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(insert_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="push_subscriptions")
