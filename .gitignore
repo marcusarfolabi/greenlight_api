@@ -22,3 +22,4 @@ note.txt
 Dockerfile.local.env.docker
 .env.docker
 docker-compose.yml
+app/cache

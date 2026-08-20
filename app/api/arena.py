@@ -5,16 +5,16 @@ import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta
-from typing import Optional
+
 from fastapi import (
     APIRouter,
-    Request,
     BackgroundTasks,
     Body,
     Depends,
     File,
     Form,
     HTTPException,
+    Request,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
@@ -56,8 +56,8 @@ from app.services.mail_service import MailService
 from app.services.token_service import TokenService
 from app.services.twilio_service import TwilioService
 from app.services.upload_service import parse_questions_file
-from app.services.ws_manager import ws_manager
 from app.services.user_service import UserService
+from app.services.ws_manager import ws_manager
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ def _players_for_arena_session_query(db: Session, arena: Arena):
 
 
 async def _bg_send_sms(
-    to: str, recipient_name: Optional[str], body: str, arena_access_code: int
+    to: str, recipient_name: str | None, body: str, arena_access_code: int
 ):
     try:
         ok = await TwilioService.send_sms_arena_access_code_async(
@@ -115,11 +115,11 @@ async def _bg_send_sms(
 
 async def _bg_send_email(
     to: str,
-    recipient_name: Optional[str],
+    recipient_name: str | None,
     subject: str,
     body: str,
     arena_details: dict,
-    org_name: Optional[str],
+    org_name: str | None,
 ):
     try:
         await MailService.send_email_arena_access_code(
@@ -136,7 +136,7 @@ async def _bg_send_email(
         )
 
 
-def _username_seed_from_player_name(player_name: Optional[str]) -> str:
+def _username_seed_from_player_name(player_name: str | None) -> str:
     if not player_name:
         return "player"
     normalized = "".join(
@@ -157,7 +157,7 @@ def _generate_unique_username(db: Session, seed: str) -> str:
     return candidate
 
 
-def _mask_account_number(account_number: Optional[str]) -> str:
+def _mask_account_number(account_number: str | None) -> str:
     if not account_number:
         return "-"
     value = account_number.strip()
@@ -401,7 +401,7 @@ async def generate_questions_ai(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Question generation failed: {str(e)}",
+            detail=f"Question generation failed: {e!s}",
         )
     except Exception as e:
         logger.error(f"Error generating questions: {e}")
@@ -992,9 +992,11 @@ async def save_player_banking_profile(
                 organization_id=str(player.organization_id),
                 accepted_terms=True,
             )
-            client_ip = request.headers.get("CF-Connecting-IP") or \
-                            request.headers.get("X-Forwarded-For") or \
-                            request.client.host
+            client_ip = (
+                request.headers.get("CF-Connecting-IP")
+                or request.headers.get("X-Forwarded-For")
+                or request.client.host
+            )
             target_user.client_ip = client_ip
 
             user = UserService.create_user(db, target_user)
@@ -1020,7 +1022,9 @@ async def save_player_banking_profile(
         expire = datetime.utcnow() + timedelta(minutes=15)
         otp_cache.set_otp(email=user.email, otp=otp_code, expires_at=expire)
 
-        arena_for_onboarding = db.query(Arena).filter(Arena.id == player.arena_id).first()
+        arena_for_onboarding = (
+            db.query(Arena).filter(Arena.id == player.arena_id).first()
+        )
         onboarding_arena_name = (
             arena_for_onboarding.arena_name
             if arena_for_onboarding and arena_for_onboarding.arena_name
@@ -1030,10 +1034,7 @@ async def save_player_banking_profile(
         await MailService.send_payout_onboarding_email(
             email=user.email,
             name=(
-                user.first_name
-                or data.account_holder_name
-                or user.username
-                or "Player"
+                user.first_name or data.account_holder_name or user.username or "Player"
             ),
             otp=otp_code,
             arena_name=onboarding_arena_name,
@@ -1046,9 +1047,7 @@ async def save_player_banking_profile(
         )
 
         payout_profile = (
-            db.query(PayoutProfile)
-            .filter(PayoutProfile.user_id == user.id)
-            .first()
+            db.query(PayoutProfile).filter(PayoutProfile.user_id == user.id).first()
         )
         if not payout_profile:
             payout_profile = PayoutProfile(
@@ -1102,7 +1101,7 @@ async def save_player_banking_profile(
 async def get_organization_players(
     offset: int = 0,
     limit: int = 100,
-    search: Optional[str] = None,
+    search: str | None = None,
     current_user: AuthContext = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[PlayerResponse]:
@@ -1423,7 +1422,7 @@ async def upload_questions(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to parse file: {str(e)}",
+            detail=f"Failed to parse file: {e!s}",
         )
 
     if preview:
@@ -1493,7 +1492,7 @@ async def get_arena_players(
     arena_id: str,
     offset: int = 0,
     limit: int = 100,
-    search: Optional[str] = None,
+    search: str | None = None,
     db: Session = Depends(get_db),
 ) -> list[PlayerResponse]:
     """Get list of players in the arena lobby"""
@@ -1516,7 +1515,7 @@ async def get_arena_players(
             .filter(
                 Player.arena_id == arena_id,
                 func.lower(Player.username).like(pattern)
-                | func.lower(Arena.arena_name).like(pattern)
+                | func.lower(Arena.arena_name).like(pattern),
             )
         )
         if arena.players_session_id:
@@ -1556,8 +1555,8 @@ async def send_participants_message(
     arena_id: str,
     background_tasks: BackgroundTasks,
     channel: str = Form(...),
-    file: Optional[UploadFile] = File(None),  # Expecting uploaded file
-    contacts: Optional[str] = Form(None),  # Newline or comma separated contacts
+    file: UploadFile | None = File(None),  # Expecting uploaded file
+    contacts: str | None = Form(None),  # Newline or comma separated contacts
     message: str = Form(...),
     db: Session = Depends(get_db),
 ):
@@ -1601,7 +1600,7 @@ async def send_participants_message(
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to process file: {str(e)}",
+                detail=f"Failed to process file: {e!s}",
             )
 
     if contacts:
@@ -2188,7 +2187,6 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                         finalization = await close_arena_and_build_payout_ledger(
                             arena_id=arena.id, db=db
                         )
-
 
                         await ws_manager.broadcast(
                             str(arena.access_code),

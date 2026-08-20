@@ -1,8 +1,17 @@
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
+
 import requests
-from fastapi import APIRouter, Request, BackgroundTasks, Depends, Form, HTTPException, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Form,
+    HTTPException,
+    Request,
+    status,
+)
 from fastapi.responses import JSONResponse
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
@@ -206,9 +215,11 @@ async def auth_google(
                 accepted_terms=True,
             )
 
-            client_ip = request.headers.get("CF-Connecting-IP") or \
-                            request.headers.get("X-Forwarded-For") or \
-                            request.client.host
+            client_ip = (
+                request.headers.get("CF-Connecting-IP")
+                or request.headers.get("X-Forwarded-For")
+                or request.client.host
+            )
 
             new_user_data.client_ip = client_ip
             user = UserService.create_user(db, new_user_data)
@@ -260,7 +271,6 @@ async def auth_google(
                 "linkedin_id": user.linkedin_id,
                 "apple_id": user.apple_id,
                 "location": user.location,
-
             },
         }
 
@@ -272,11 +282,11 @@ async def auth_google(
             detail="Invalid Google OAuth token signature or token expired",
         )
 
+
 @router.post("/linkedin")
 async def auth_linkedin(
     payload: LinkedInTokenPayload,
     request: Request,
-
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
@@ -352,7 +362,11 @@ async def auth_linkedin(
             )
             email_response.raise_for_status()
             email_data = email_response.json()
-            email = email_data.get("elements", [{}])[0].get("handle~", {}).get("emailAddress")
+            email = (
+                email_data.get("elements", [{}])[0]
+                .get("handle~", {})
+                .get("emailAddress")
+            )
             linkedin_id = profile_data.get("id")
             first_name = profile_data.get("localizedFirstName")
             last_name = profile_data.get("localizedLastName")
@@ -406,9 +420,11 @@ async def auth_linkedin(
             country_iso=payload.country_iso,
             accepted_terms=True,
         )
-        client_ip = request.headers.get("CF-Connecting-IP") or \
-                    request.headers.get("X-Forwarded-For") or \
-                    request.client.host
+        client_ip = (
+            request.headers.get("CF-Connecting-IP")
+            or request.headers.get("X-Forwarded-For")
+            or request.client.host
+        )
         new_user_data.client_ip = client_ip
 
         user = UserService.create_user(db, new_user_data)
@@ -460,7 +476,6 @@ async def auth_linkedin(
             "linkedin_id": user.linkedin_id,
             "apple_id": user.apple_id,
             "location": user.location,
-
         },
     }
     return response_data
@@ -485,9 +500,11 @@ async def register(
             detail="Username already taken",
         )
 
-    client_ip = request.headers.get("CF-Connecting-IP") or \
-                    request.headers.get("X-Forwarded-For") or \
-                    request.client.host
+    client_ip = (
+        request.headers.get("CF-Connecting-IP")
+        or request.headers.get("X-Forwarded-For")
+        or request.client.host
+    )
     user_data.client_ip = client_ip
 
     new_user = UserService.create_user(db, user_data)

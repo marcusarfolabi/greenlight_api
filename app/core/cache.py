@@ -3,7 +3,6 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Tuple
 
 from app.core.config import ROOT_DIR
 
@@ -19,17 +18,17 @@ class OTPCacheManager:
         if not cache_path.exists():
             cache_path.write_text("{}")
 
-    def _load(self) -> Dict[str, Tuple[str, str]]:
+    def _load(self) -> dict[str, tuple[str, str]]:
         """Loads the cache from the JSON file."""
         if not os.path.exists(self.CACHE_FILE):
             return {}
         try:
             with open(self.CACHE_FILE, "r") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return {}
 
-    def _save(self, data: Dict[str, Tuple[str, str]]) -> None:
+    def _save(self, data: dict[str, tuple[str, str]]) -> None:
         """Saves the cache to the JSON file."""
         self._ensure_cache_file()
         with open(self.CACHE_FILE, "w") as f:

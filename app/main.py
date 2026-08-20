@@ -1,18 +1,18 @@
-import os
 import logging
+import os
+
 from dotenv import load_dotenv
-from app.api import api_router
-from app.db.session import engine
-from app.models import Base
-from app.core.config import settings
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.sql import text
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from sqlalchemy.exc import OperationalError
 
+from app.api import api_router
+from app.core.config import settings
+from app.db.session import engine
+from app.models import Base
 from app.scripts.admin_seeder import seed_superadmin
 from app.scripts.subscription_seeder import seed_subscription_plans
 
@@ -32,11 +32,14 @@ DEFAULT_CORS_ORIGINS = [
 
 
 def build_cors_origins() -> list[str]:
-    configured = [origin.strip() for origin in settings.CORS_ORIGINS if origin and origin.strip()]
+    configured = [
+        origin.strip() for origin in settings.CORS_ORIGINS if origin and origin.strip()
+    ]
     merged = set(DEFAULT_CORS_ORIGINS)
     merged.update(configured)
     merged.discard("*")
     return sorted(merged)
+
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -153,5 +156,5 @@ async def root():
         return {
             "status": "Greenlight is operational",
             "environment": os.getenv("ENVIRONMENT"),
-            "db_status": f"connection failed: {str(e)}",
+            "db_status": f"connection failed: {e!s}",
         }
