@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from typing import Dict, Set
+
 from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
@@ -9,9 +9,9 @@ logger = logging.getLogger(__name__)
 
 class ConnectionManager:
     def __init__(self):
-        self.active: Dict[str, Set[WebSocket]] = {}
-        self.timers: Dict[str, int] = {}
-        self.timer_tasks: Dict[str, asyncio.Task] = {}
+        self.active: dict[str, set[WebSocket]] = {}
+        self.timers: dict[str, int] = {}
+        self.timer_tasks: dict[str, asyncio.Task] = {}
 
     async def connect(self, access_code: str, websocket: WebSocket):
         conns = self.active.setdefault(access_code, set())
@@ -60,7 +60,9 @@ class ConnectionManager:
             try:
                 await ws.close(code=1000)
             except Exception:
-                logger.exception("Error closing websocket for access_code=%s", access_code)
+                logger.exception(
+                    "Error closing websocket for access_code=%s", access_code
+                )
 
         # Cleanup internal state
         self.active.pop(access_code, None)
@@ -115,13 +117,17 @@ class ConnectionManager:
             try:
                 while self.timers.get(access_code, 0) > 0:
                     await asyncio.sleep(1)
-                    self.timers[access_code] = max(0, self.timers.get(access_code, 0) - 1)
-                    await broadcast_countdown_coro(access_code, self.timers[access_code])
+                    self.timers[access_code] = max(
+                        0, self.timers.get(access_code, 0) - 1
+                    )
+                    await broadcast_countdown_coro(
+                        access_code, self.timers[access_code]
+                    )
                 # final broadcast at 0
                 await broadcast_countdown_coro(access_code, 0)
-                
+
                 await self.broadcast(access_code, {"type": "game_start", "payload": {}})
-                
+
             except asyncio.CancelledError:
                 return
             finally:
@@ -130,7 +136,9 @@ class ConnectionManager:
 
         task = asyncio.create_task(_run())
         self.timer_tasks[access_code] = task
-        logger.info("Countdown task started for access_code=%s seconds=%s", access_code, seconds)
+        logger.info(
+            "Countdown task started for access_code=%s seconds=%s", access_code, seconds
+        )
         return True
 
 

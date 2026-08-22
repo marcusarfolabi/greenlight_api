@@ -32,6 +32,7 @@ class Player(Base):
         String(64), nullable=True, index=True
     )
     username: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    avatar: Mapped[str | None] = mapped_column(String(100), nullable=True)
     attempt_date: Mapped[datetime] = mapped_column(insert_default=func.now())
     status: Mapped[str] = mapped_column(
         String(20), default="joined"

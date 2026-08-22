@@ -3,7 +3,6 @@ import csv
 import io
 import logging
 import secrets
-import uuid
 from datetime import datetime, timedelta
 
 from fastapi import (
@@ -16,8 +15,6 @@ from fastapi import (
     HTTPException,
     Request,
     UploadFile,
-    WebSocket,
-    WebSocketDisconnect,
     status,
 )
 from PyPDF2 import PdfReader  # type: ignore
@@ -29,7 +26,6 @@ from app.core.cache import otp_cache
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.arena import Arena, ArenaTokenUsageLog, Question
-from app.models.organization import ArenaPayoutReport
 from app.models.player import Player, PlayerAnswerScore, PlayerBankingProfile
 from app.models.user import PayoutProfile, User
 from app.schemas.arena import (
@@ -54,10 +50,19 @@ from app.schemas.user import AuthContext, UserCreate
 from app.services.ai_question_service import AIQuestionGenerationService
 from app.services.mail_service import MailService
 from app.services.token_service import TokenService
-from app.services.twilio_service import TwilioService
 from app.services.upload_service import parse_questions_file
 from app.services.user_service import UserService
 from app.services.ws_manager import ws_manager
+from app.utils.arenautil import (
+    _bg_send_email,
+    _bg_send_sms,
+    _ensure_arena_session_id,
+    _generate_unique_username,
+    _new_players_session_id,
+    _notify_superadmins_payout_ready,
+    _players_for_arena_session_query,
+    _username_seed_from_player_name,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -65,182 +70,6 @@ logger = logging.getLogger(__name__)
 # Upload limits
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_PDF_PAGES = 50
-
-
-def _new_players_session_id() -> str:
-    return str(uuid.uuid4())
-
-
-def _ensure_arena_session_id(db: Session, arena: Arena) -> str:
-    if arena.players_session_id:
-        return arena.players_session_id
-
-    arena.players_session_id = _new_players_session_id()
-    db.add(arena)
-    db.flush()
-    return arena.players_session_id
-
-
-def _players_for_arena_session_query(db: Session, arena: Arena):
-    query = db.query(Player).filter(Player.arena_id == arena.id)
-    if arena.players_session_id:
-        query = query.filter(Player.session_id == arena.players_session_id)
-    return query
-
-
-async def _bg_send_sms(
-    to: str, recipient_name: str | None, body: str, arena_access_code: int
-):
-    try:
-        ok = await TwilioService.send_sms_arena_access_code_async(
-            to, recipient_name, body
-        )
-        if ok:
-            logger.info(
-                "Queued SMS sent to %s for arena access code %s", to, arena_access_code
-            )
-        else:
-            logger.warning(
-                "Queued SMS failed to send to %s for arena access code %s",
-                to,
-                arena_access_code,
-            )
-    except Exception:
-        logger.exception(
-            "Error sending queued SMS to %s for arena access code %s",
-            to,
-            arena_access_code,
-        )
-
-
-async def _bg_send_email(
-    to: str,
-    recipient_name: str | None,
-    subject: str,
-    body: str,
-    arena_details: dict,
-    org_name: str | None,
-):
-    try:
-        await MailService.send_email_arena_access_code(
-            to, recipient_name or "Participant", subject, body, arena_details, org_name
-        )
-        logger.info(
-            "Queued email sent to %s for arena %s", to, arena_details.get("arena_name")
-        )
-    except Exception:
-        logger.exception(
-            "Error sending queued email to %s for arena %s",
-            to,
-            arena_details.get("arena_name"),
-        )
-
-
-def _username_seed_from_player_name(player_name: str | None) -> str:
-    if not player_name:
-        return "player"
-    normalized = "".join(
-        c if (c.isalnum() or c in {"_", ".", "-"}) else "_"
-        for c in player_name.strip().lower()
-    )
-    normalized = "_".join(part for part in normalized.split("_") if part)
-    return (normalized or "player")[:40]
-
-
-def _generate_unique_username(db: Session, seed: str) -> str:
-    candidate = seed[:50] or "player"
-    counter = 1
-    while db.query(User).filter(User.username == candidate).first():
-        suffix = f"_{counter}"
-        candidate = f"{seed[: max(1, 50 - len(suffix))]}{suffix}"
-        counter += 1
-    return candidate
-
-
-def _mask_account_number(account_number: str | None) -> str:
-    if not account_number:
-        return "-"
-    value = account_number.strip()
-    if len(value) <= 4:
-        return value
-    return f"{'*' * (len(value) - 4)}{value[-4:]}"
-
-
-async def _notify_superadmins_payout_ready(arena: Arena, db: Session) -> None:
-    payout_rows_raw = (
-        db.query(ArenaPayoutReport, PlayerBankingProfile)
-        .outerjoin(
-            PlayerBankingProfile,
-            PlayerBankingProfile.player_id == ArenaPayoutReport.player_id,
-        )
-        .filter(
-            ArenaPayoutReport.arena_id == arena.id,
-            ArenaPayoutReport.payout_amount_cents > 0,
-            ArenaPayoutReport.payout_status == "pending",
-        )
-        .order_by(ArenaPayoutReport.final_rank.asc())
-        .all()
-    )
-
-    if not payout_rows_raw:
-        return
-
-    payout_rows: list[dict] = []
-    total_payout_cents = 0
-    for report, profile in payout_rows_raw:
-        payout_cents = int(report.payout_amount_cents or 0)
-        total_payout_cents += payout_cents
-        payout_rows.append(
-            {
-                "rank": report.final_rank,
-                "username": report.username,
-                "payout_amount": f"GBP {(payout_cents / 100):.2f}",
-                "account_holder_name": (
-                    profile.account_holder_name if profile else "Not provided"
-                ),
-                "email": profile.email if profile else "Not provided",
-                "phone_number": (
-                    profile.phone_number
-                    if profile and profile.phone_number
-                    else "Not provided"
-                ),
-                "bank_name_or_code": (
-                    profile.bank_code
-                    if profile and profile.bank_code
-                    else "Not provided"
-                ),
-                "masked_account_number": _mask_account_number(
-                    profile.account_number if profile else None
-                ),
-            }
-        )
-
-    superadmins = db.query(User).filter(func.lower(User.role) == "superadmin").all()
-    if not superadmins:
-        logger.warning(
-            "No superadmin users found for payout notification on arena %s", arena.id
-        )
-        return
-
-    for admin in superadmins:
-        try:
-            await MailService.send_superadmin_payout_notification(
-                email=admin.email,
-                admin_name=admin.first_name or admin.username or "Admin",
-                arena_name=arena.arena_name,
-                arena_id=arena.id,
-                access_code=str(arena.access_code),
-                payout_rows=payout_rows,
-                payout_count=len(payout_rows),
-                total_payout=f"GBP {(total_payout_cents / 100):.2f}",
-                admin_login_url="https://admin.greenlightquiz.com/login",
-            )
-        except Exception:
-            logger.exception(
-                "Failed sending superadmin payout notification for arena %s to %s",
-                arena.id,
-                admin.email,
-            )
 
 
 @router.post("", response_model=ArenaResponse)
@@ -270,12 +99,15 @@ async def create_arena(
         )
 
         # 2. Atomic Debit: Only if AI is enabled and there are costs
-        if org.use_ai_for_arenas and total_ai_tokens > 0:
-            if not TokenService.deduct_tokens(db, org.id, total_ai_tokens):
-                raise HTTPException(
-                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                    detail="Insufficient tokens",
-                )
+        if (
+            org.use_ai_for_arenas
+            and total_ai_tokens > 0
+            and not TokenService.deduct_tokens(db, org.id, total_ai_tokens)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Insufficient tokens",
+            )
 
         # 3. Create Arena
         new_arena = Arena(
@@ -513,6 +345,8 @@ async def get_arena(
         arena_name=arena.arena_name,
         is_public=arena.is_public,
         access_code=arena.access_code,
+        total_questions=0,
+        total_players=0,
         questions=[
             QuestionResponse.model_validate(q) for q in arena.questions
         ],  # Convert questions too!
@@ -1787,7 +1621,6 @@ def get_arena_scoreboard(
     db: Session,
 ):
     """Helper function to calculate scoreboard for an arena with all player scores ranked"""
-    from app.models.player import PlayerAnswerScore
 
     arena = db.query(Arena).filter(Arena.id == arena_id).first()
     if not arena:
@@ -1843,390 +1676,3 @@ def get_arena_scoreboard(
 
     # Convert to response models
     return [PlayerScoreboardResponse.model_validate(entry) for entry in scoreboard_data]
-
-
-async def close_arena_and_build_payout_ledger(arena_id: str, db: Session) -> dict:
-    arena = db.query(Arena).filter(Arena.id == arena_id).first()
-    if not arena:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Arena not found"
-        )
-
-    players = _players_for_arena_session_query(db, arena).all()
-
-    if not players:
-        return {
-            "scoreboard": [],
-            "completed_players": 0,
-            "completion_rate": 0.0,
-        }
-
-    ranked_players: list[dict] = []
-    now = datetime.utcnow()
-
-    for player in players:
-        answers = (
-            db.query(PlayerAnswerScore)
-            .filter(
-                PlayerAnswerScore.player_id == player.id,
-                PlayerAnswerScore.arena_id == arena_id,
-            )
-            .all()
-        )
-
-        total_score = sum(a.points_earned for a in answers)
-        answers_submitted = len(answers)
-        correct_answers = sum(1 for a in answers if a.is_correct)
-        accuracy_percentage = (
-            round((correct_answers / answers_submitted) * 100, 2)
-            if answers_submitted > 0
-            else 0.0
-        )
-
-        player.score = total_score
-        player.answers_submitted = answers_submitted
-        player.correct_answers = correct_answers
-
-        # Treat a player as completed if they participated in at least one question.
-        if answers_submitted > 0:
-            player.status = "completed"
-            if player.completed_at is None:
-                player.completed_at = now
-
-        ranked_players.append(
-            {
-                "player": player,
-                "player_id": player.id,
-                "username": player.username or f"Player_{player.id}",
-                "total_score": total_score,
-                "answers_correct": correct_answers,
-                "answers_total": answers_submitted,
-                "accuracy_percentage": accuracy_percentage,
-                "rank": None,
-            }
-        )
-
-    ranked_players.sort(
-        key=lambda entry: (
-            -(entry["total_score"] or 0),
-            -(entry["answers_correct"] or 0),
-            (entry["username"] or "").lower(),
-        )
-    )
-
-    for index, entry in enumerate(ranked_players, start=1):
-        entry["rank"] = index
-        entry["player"].rank = index
-
-    # 3. Define your prize pool matrix structure (Example calculation model)
-    # Top 1 gets 50%, Top 2 gets 30%, Top 3 gets 20% of a $50 pool (calculated in cents)
-    prize_pool_cents = 5000
-    payout_distribution = {
-        1: int(prize_pool_cents * 0.50),
-        2: int(prize_pool_cents * 0.30),
-        3: int(prize_pool_cents * 0.20),
-    }
-
-    existing_reports = {
-        report.player_id: report
-        for report in db.query(ArenaPayoutReport)
-        .filter(ArenaPayoutReport.arena_id == arena_id)
-        .all()
-    }
-
-    eligible_for_payout = [
-        entry for entry in ranked_players if (entry["answers_total"] or 0) > 0
-    ]
-
-    # 4. Generate or update payout records for participants.
-    for entry in eligible_for_payout:
-        player = entry["player"]
-        current_rank = entry["rank"]
-        payout_reward = payout_distribution.get(current_rank, 0)
-
-        existing = existing_reports.get(player.id)
-        if existing:
-            existing.username = player.username or f"Player_{player.id}"
-            existing.final_score = entry["total_score"]
-            existing.final_rank = current_rank
-            existing.payout_amount_cents = payout_reward
-            existing.payout_status = "pending" if payout_reward > 0 else "skipped"
-        else:
-            payout_entry = ArenaPayoutReport(
-                arena_id=arena_id,
-                player_id=player.id,
-                username=player.username or f"Player_{player.id}",
-                final_score=entry["total_score"],
-                final_rank=current_rank,
-                payout_amount_cents=payout_reward,
-                payout_status="pending" if payout_reward > 0 else "skipped",
-            )
-            db.add(payout_entry)
-
-    total_players = len(ranked_players)
-    completed_players = sum(
-        1 for entry in ranked_players if (entry["answers_total"] or 0) > 0
-    )
-    completion_rate = (
-        round((completed_players / total_players) * 100, 2)
-        if total_players > 0
-        else 0.0
-    )
-
-    db.commit()
-
-    # Prepare a fresh session tag for the next time this arena is played.
-    arena.players_session_id = _new_players_session_id()
-    db.add(arena)
-    db.commit()
-
-    return {
-        "scoreboard": [
-            {
-                "player_id": entry["player_id"],
-                "username": entry["username"],
-                "total_score": entry["total_score"],
-                "answers_correct": entry["answers_correct"],
-                "answers_total": entry["answers_total"],
-                "accuracy_percentage": entry["accuracy_percentage"],
-                "rank": entry["rank"],
-            }
-            for entry in ranked_players
-        ],
-        "completed_players": completed_players,
-        "completion_rate": completion_rate,
-    }
-
-
-@router.websocket("/ws/lobby/{access_code}")
-async def lobby_websocket(websocket: WebSocket, access_code: str):
-    """WebSocket endpoint for real-time lobby updates and shared countdown."""
-
-    # Accept the connection
-    await websocket.accept()
-    await ws_manager.connect(str(access_code), websocket)
-
-    player_info: dict = {"player_id": 0, "player_name": "", "arena_id": ""}
-
-    try:
-        from app.db.session import get_db as _get_db
-
-        db_gen = _get_db()
-        db = next(db_gen)
-
-        try:
-            arena = db.query(Arena).filter(Arena.access_code == access_code).first()
-            if not arena:
-                await websocket.close(code=1008)
-                return
-
-            player_info["arena_id"] = arena.id
-
-            # Fetch players based on arena ID
-            players = _players_for_arena_session_query(db, arena).all()
-            players_list = [{"id": p.id, "username": p.username} for p in players]
-
-            payload = {
-                "type": "lobby_update",
-                "payload": {
-                    "players": players_list,
-                    "total_players": len(players_list),
-                    "lobby_waiting_time": 30,
-                    "arena_name": arena.arena_name,
-                    "arena_access_code": arena.access_code,
-                },
-            }
-
-            await ws_manager.broadcast(str(arena.access_code), payload)
-
-            async def _countdown_broadcast(ac, remaining):
-                await ws_manager.broadcast(
-                    ac, {"type": "countdown", "payload": {"countdown": remaining}}
-                )
-
-            # Listen for incoming messages
-            while True:
-                data = await websocket.receive_json()
-                msg_type = data.get("type")
-
-                if msg_type == "register_player":
-                    try:
-                        payload = data.get("payload", {})
-                        player_name = payload.get("player_name")
-
-                        if player_name:
-                            player = (
-                                db.query(Player)
-                                .filter(
-                                    Player.arena_id == arena.id,
-                                    Player.session_id == arena.players_session_id,
-                                    Player.username == player_name,
-                                )
-                                .first()
-                            )
-
-                            if player:
-                                player_info["player_id"] = player.id
-                                player_info["player_name"] = player_name
-                                logger.info(
-                                    f"Player {player_name} (ID: {player.id}) registered in arena {arena.id}"
-                                )
-                    except Exception:
-                        logger.exception("Error handling player registration")
-
-                elif msg_type == "host_ready":
-                    try:
-                        seconds = int(data.get("seconds", 30))
-                        ws_manager.start_countdown(
-                            str(arena.access_code), seconds, _countdown_broadcast
-                        )
-                    except Exception:
-                        logger.exception("Error handling host_ready message")
-
-                elif msg_type == "question_display":
-                    try:
-                        await ws_manager.broadcast(
-                            str(arena.access_code),
-                            {
-                                "type": "question_display",
-                                "payload": data.get("payload", {}),
-                            },
-                        )
-                    except Exception:
-                        logger.exception("Error broadcasting question")
-
-                elif msg_type == "player_answer":
-                    try:
-                        payload = data.get("payload", {})
-                        question_id = payload.get("question_id")
-                        answer_selected = payload.get("answer_selected")
-                        is_correct = payload.get("is_correct")
-                        time_taken = payload.get("time_taken", 0)
-                        question_time_limit = payload.get("question_time_limit", 0)
-                        max_points = payload.get("max_points", 0)
-
-                        points_earned = PlayerAnswerScore.calculate_score(
-                            time_taken=time_taken,
-                            question_time_limit=question_time_limit,
-                            max_points=max_points,
-                            is_correct=is_correct,
-                        )
-
-                        # Save answer to database if player is registered
-                        if player_info["player_id"] and player_info["arena_id"]:
-                            answer_score = PlayerAnswerScore(
-                                player_id=player_info["player_id"],
-                                arena_id=player_info["arena_id"],
-                                question_id=question_id,
-                                answer_selected=answer_selected,
-                                is_correct=is_correct,
-                                time_taken=time_taken,
-                                question_time_limit=question_time_limit,
-                                points_earned=points_earned,
-                                max_points=max_points,
-                            )
-                            db.add(answer_score)
-                            db.commit()
-                            logger.info(
-                                f"Saved answer for player {player_info['player_name']} on Q{question_id}: {points_earned} points"
-                            )
-
-                        await ws_manager.broadcast(
-                            str(arena.access_code),
-                            {
-                                "type": "player_score_update",
-                                "payload": {
-                                    "question_id": question_id,
-                                    "player_name": player_info["player_name"],
-                                    "answer_selected": answer_selected,
-                                    "is_correct": is_correct,
-                                    "time_taken": time_taken,
-                                    "points_earned": points_earned,
-                                },
-                            },
-                        )
-
-                        logger.info(
-                            f"Player {player_info['player_name']} answered Q{question_id} correctly={is_correct} in {time_taken}s, earned {points_earned} points"
-                        )
-                    except Exception:
-                        logger.exception("Error processing player answer")
-
-                elif msg_type == "hide_question":
-                    # Hide question from all connected clients
-                    try:
-                        await ws_manager.broadcast(
-                            str(arena.access_code),
-                            {"type": "hide_question", "payload": {}},
-                        )
-                    except Exception:
-                        logger.exception("Error hiding question")
-
-                elif msg_type == "question_timeout":
-                    try:
-                        scoreboard = get_arena_scoreboard(arena.id, db)
-                        await ws_manager.broadcast(
-                            str(arena.access_code),
-                            {
-                                "type": "scoreboard_update",
-                                "payload": {
-                                    "scoreboard": [
-                                        entry.model_dump() for entry in scoreboard
-                                    ]
-                                },
-                            },
-                        )
-                        logger.info(
-                            f"Broadcasted scoreboard for arena {arena.id} due to question timeout"
-                        )
-                    except Exception:
-                        logger.exception("Error broadcasting scoreboard on timeout")
-
-                elif msg_type == "end_game" or msg_type == "game_over":
-                    try:
-                        finalization = await close_arena_and_build_payout_ledger(
-                            arena_id=arena.id, db=db
-                        )
-
-                        await ws_manager.broadcast(
-                            str(arena.access_code),
-                            {
-                                "type": "arena_concluded",
-                                "payload": {
-                                    "message": "Game over! Financial payout ledger generated.",
-                                    "scoreboard": finalization.get("scoreboard", []),
-                                    "completed_players": finalization.get(
-                                        "completed_players", 0
-                                    ),
-                                    "completion_rate": finalization.get(
-                                        "completion_rate", 0.0
-                                    ),
-                                },
-                            },
-                        )
-                        # Close all websocket connections for this arena to avoid lingering sockets
-                        try:
-                            await ws_manager.close_room(str(arena.access_code))
-                        except Exception:
-                            logger.exception(
-                                "Error closing websockets for arena %s", arena.id
-                            )
-                    except Exception as e:
-                        logger.exception(
-                            f"Critical payout calculation failure on arena {arena.id}: {e}"
-                        )
-
-        finally:
-            try:
-                next(db_gen, None)
-            except StopIteration:
-                pass
-
-    except WebSocketDisconnect:
-        ws_manager.disconnect(str(access_code), websocket)
-    except Exception:
-        ws_manager.disconnect(str(access_code), websocket)
-        try:
-            await websocket.close()
-        except Exception:
-            pass
