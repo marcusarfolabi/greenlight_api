@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from datetime import datetime
 
 from fastapi import WebSocket
 
@@ -12,6 +13,7 @@ class ConnectionManager:
         self.active: dict[str, set[WebSocket]] = {}
         self.timers: dict[str, int] = {}
         self.timer_tasks: dict[str, asyncio.Task] = {}
+        self.active_questions: dict[str, dict] = {}
 
     async def connect(self, access_code: str, websocket: WebSocket):
         conns = self.active.setdefault(access_code, set())
@@ -33,12 +35,13 @@ class ConnectionManager:
             len(conns),
         )
         if not conns:
-            # no more clients for this access code: cancel timer and cleanup
+            # Cleanup internal room states when all clients leave
             self.active.pop(access_code, None)
             task = self.timer_tasks.pop(access_code, None)
             if task:
                 task.cancel()
             self.timers.pop(access_code, None)
+            self.active_questions.pop(access_code, None)
 
     def connection_count(self, access_code: str) -> int:
         return len(self.active.get(access_code, set()))
@@ -46,14 +49,17 @@ class ConnectionManager:
     async def close_room(self, access_code: str):
         """Close all WebSocket connections for a given access_code and cleanup timers/tasks."""
         conns = list(self.active.get(access_code, set()))
+
+        # Cleanup internal state completely
+        task = self.timer_tasks.pop(access_code, None)
+        if task:
+            task.cancel()
+        self.timers.pop(access_code, None)
+        self.active_questions.pop(access_code, None)
+        self.active.pop(access_code, None)
+
         if not conns:
             logger.info("No connections to close for access_code=%s", access_code)
-            # ensure timers/tasks cleaned
-            task = self.timer_tasks.pop(access_code, None)
-            if task:
-                task.cancel()
-            self.timers.pop(access_code, None)
-            self.active.pop(access_code, None)
             return
 
         for ws in conns:
@@ -64,12 +70,6 @@ class ConnectionManager:
                     "Error closing websocket for access_code=%s", access_code
                 )
 
-        # Cleanup internal state
-        self.active.pop(access_code, None)
-        task = self.timer_tasks.pop(access_code, None)
-        if task:
-            task.cancel()
-        self.timers.pop(access_code, None)
         logger.info("Closed %s connections for access_code=%s", len(conns), access_code)
 
     async def broadcast(self, access_code: str, message: dict):
@@ -81,9 +81,7 @@ class ConnectionManager:
                 message.get("type"),
             )
             return
-        # Use a safe default serializer so datetime and other non-JSON types
-        # are converted to strings instead of raising TypeError which would
-        # prevent broadcasts from being sent.
+
         data = json.dumps(message, default=str)
         to_remove = []
         sent_count = 0
@@ -107,7 +105,6 @@ class ConnectionManager:
         )
 
     def start_countdown(self, access_code: str, seconds: int, broadcast_countdown_coro):
-        # broadcast_countdown_coro must be an async callable accepting (access_code, remaining_seconds)
         if access_code in self.timer_tasks:
             logger.info("Countdown already running for access_code=%s", access_code)
             return False
@@ -123,9 +120,7 @@ class ConnectionManager:
                     await broadcast_countdown_coro(
                         access_code, self.timers[access_code]
                     )
-                # final broadcast at 0
                 await broadcast_countdown_coro(access_code, 0)
-
                 await self.broadcast(access_code, {"type": "game_start", "payload": {}})
 
             except asyncio.CancelledError:
@@ -140,6 +135,20 @@ class ConnectionManager:
             "Countdown task started for access_code=%s seconds=%s", access_code, seconds
         )
         return True
+
+    def set_active_question(self, access_code: str, question_data: dict):
+        """Save active question payload and timestamp for mid-game sync."""
+        self.active_questions[str(access_code)] = {
+            "question": question_data.get("question"),
+            "question_index": question_data.get("question_index", 0),
+            "started_at": datetime.utcnow().timestamp(),
+            "time_limit_seconds": question_data.get("question", {}).get(
+                "time_limit_seconds", 30
+            ),
+        }
+
+    def clear_active_question(self, access_code: str):
+        self.active_questions.pop(str(access_code), None)
 
 
 ws_manager = ConnectionManager()

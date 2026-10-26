@@ -1516,6 +1516,7 @@ async def get_lobby_info(
             {
                 "id": p.id,
                 "username": p.username,
+                "avatar": p.avatar,
                 "joined_at": p.attempt_date.isoformat() if p.attempt_date else None,
             }
         )

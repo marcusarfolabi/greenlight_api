@@ -9,6 +9,7 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.models.arena import Arena
@@ -73,7 +74,7 @@ def get_arena_scoreboard(
                 "answers_total": total_answers,
                 "accuracy_percentage": round(accuracy, 2),
                 "last_answered_at": last_answered,
-                "rank": None,  # Will be set after sorting
+                "rank": None,
             }
         )
 
@@ -251,7 +252,6 @@ async def close_arena_and_build_payout_ledger(arena_id: str, db: Session) -> dic
 async def lobby_websocket(websocket: WebSocket, access_code: str):
     """WebSocket endpoint for real-time lobby updates and shared countdown."""
 
-    # Accept the connection
     await websocket.accept()
     await ws_manager.connect(str(access_code), websocket)
 
@@ -261,19 +261,27 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
         from app.db.session import get_db as _get_db
 
         db_gen = _get_db()
-        db = next(db_gen)
+        db: Session = next(db_gen)
 
         try:
-            arena = db.query(Arena).filter(Arena.access_code == access_code).first()
+            # Run blocking DB lookup off the main async thread pool
+            arena = await run_in_threadpool(
+                lambda: db.query(Arena).filter(Arena.access_code == access_code).first()
+            )
             if not arena:
                 await websocket.close(code=1008)
                 return
 
             player_info["arena_id"] = arena.id
 
-            # Fetch players based on arena ID
-            players = _players_for_arena_session_query(db, arena).all()
-            players_list = [{"id": p.id, "username": p.username} for p in players]
+            # Initial lobby payload fetch
+            players = await run_in_threadpool(
+                lambda: _players_for_arena_session_query(db, arena).all()
+            )
+            players_list = [
+                {"id": p.id, "username": p.username, "avatar": p.avatar}
+                for p in players
+            ]
 
             payload = {
                 "type": "lobby_update",
@@ -285,15 +293,34 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                     "arena_access_code": arena.access_code,
                 },
             }
-
             await ws_manager.broadcast(str(arena.access_code), payload)
+
+            # LATE JOINER SYNC: Check if question is already active
+            active_q = ws_manager.active_questions.get(str(access_code))
+            if active_q:
+                now_ts = datetime.utcnow().timestamp()
+                elapsed = now_ts - active_q["started_at"]
+                remaining = max(0, int(active_q["time_limit_seconds"] - elapsed))
+
+                if remaining > 0:
+                    await websocket.send_json(
+                        {
+                            "type": "game_state_sync",
+                            "payload": {
+                                "is_active": True,
+                                "current_question": active_q["question"],
+                                "question_index": active_q["question_index"],
+                                "time_remaining": remaining,
+                            },
+                        }
+                    )
 
             async def _countdown_broadcast(ac, remaining):
                 await ws_manager.broadcast(
                     ac, {"type": "countdown", "payload": {"countdown": remaining}}
                 )
 
-            # Listen for incoming messages
+            # WebSocket Loop
             while True:
                 data = await websocket.receive_json()
                 msg_type = data.get("type")
@@ -304,22 +331,22 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                         player_name = payload.get("player_name")
 
                         if player_name:
-                            player = (
-                                db.query(Player)
-                                .filter(
-                                    Player.arena_id == arena.id,
-                                    Player.session_id == arena.players_session_id,
-                                    Player.username == player_name,
-                                )
-                                .first()
-                            )
 
+                            def _get_player():
+                                return (
+                                    db.query(Player)
+                                    .filter(
+                                        Player.arena_id == arena.id,
+                                        Player.session_id == arena.players_session_id,
+                                        Player.username == player_name,
+                                    )
+                                    .first()
+                                )
+
+                            player = await run_in_threadpool(_get_player)
                             if player:
                                 player_info["player_id"] = player.id
                                 player_info["player_name"] = player_name
-                                logger.info(
-                                    f"Player {player_name} (ID: {player.id}) registered in arena {arena.id}"
-                                )
                     except Exception:
                         logger.exception("Error handling player registration")
 
@@ -327,46 +354,37 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                     try:
                         payload = data.get("payload", {})
                         avatar_style = payload.get("avatarStyle")
-                        player_id = payload.get("player_id") or player_info.get(
-                            "player_id"
-                        )
+                        p_id = payload.get("player_id") or player_info.get("player_id")
 
-                        if player_id:
-                            # 1. Update the avatar column on the existing Player record
-                            player = (
-                                db.query(Player).filter(Player.id == player_id).first()
-                            )
-                            if player:
-                                player.avatar = avatar_style
-                                db.commit()
+                        if p_id:
 
-                        # 2. Query all players for the arena session and build the payload
-                        players = _players_for_arena_session_query(db, arena).all()
-                        players_list = [
-                            {
-                                "id": p.id,
-                                "username": p.username,
-                                "avatar": p.avatar,  # Reads avatar directly from DB column
-                            }
-                            for p in players
-                        ]
+                            def _update_avatar_db():
+                                player = (
+                                    db.query(Player).filter(Player.id == p_id).first()
+                                )
+                                if player:
+                                    player.avatar = avatar_style
+                                    db.commit()
+                                return _players_for_arena_session_query(db, arena).all()
 
-                        # 3. Broadcast updated players list to all connected clients
-                        await ws_manager.broadcast(
-                            str(arena.access_code),
-                            {
-                                "type": "lobby_update",
-                                "payload": {
-                                    "players": players_list,
-                                    "total_players": len(players_list),
-                                    "arena_name": arena.arena_name,
-                                    "arena_access_code": arena.access_code,
+                            players = await run_in_threadpool(_update_avatar_db)
+                            players_list = [
+                                {"id": p.id, "username": p.username, "avatar": p.avatar}
+                                for p in players
+                            ]
+
+                            await ws_manager.broadcast(
+                                str(arena.access_code),
+                                {
+                                    "type": "lobby_update",
+                                    "payload": {
+                                        "players": players_list,
+                                        "total_players": len(players_list),
+                                        "arena_name": arena.arena_name,
+                                        "arena_access_code": arena.access_code,
+                                    },
                                 },
-                            },
-                        )
-                        logger.info(
-                            f"Updated avatar for Player ID {player_id} to '{avatar_style}'"
-                        )
+                            )
                     except Exception:
                         logger.exception("Error handling update_avatar message")
 
@@ -381,72 +399,18 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
 
                 elif msg_type == "question_display":
                     try:
+                        q_payload = data.get("payload", {})
+                        # Register active question state on memory manager
+                        ws_manager.set_active_question(
+                            str(arena.access_code), q_payload
+                        )
+
                         await ws_manager.broadcast(
                             str(arena.access_code),
-                            {
-                                "type": "question_display",
-                                "payload": data.get("payload", {}),
-                            },
+                            {"type": "question_display", "payload": q_payload},
                         )
                     except Exception:
                         logger.exception("Error broadcasting question")
-
-                # elif msg_type == "player_answer":
-                #     try:
-                #         payload = data.get("payload", {})
-                #         question_id = payload.get("question_id")
-                #         answer_selected = payload.get("answer_selected")
-                #         is_correct = payload.get("is_correct")
-                #         time_taken = payload.get("time_taken", 0)
-                #         question_time_limit = payload.get("question_time_limit", 0)
-                #         max_points = payload.get("max_points", 0)
-
-                #         points_earned = PlayerAnswerScore.calculate_score(
-                #             time_taken=time_taken,
-                #             question_time_limit=question_time_limit,
-                #             max_points=max_points,
-                #             is_correct=is_correct,
-                #         )
-
-                #         # Save answer to database if player is registered
-                #         if player_info["player_id"] and player_info["arena_id"]:
-                #             answer_score = PlayerAnswerScore(
-                #                 player_id=player_info["player_id"],
-                #                 arena_id=player_info["arena_id"],
-                #                 question_id=question_id,
-                #                 answer_selected=answer_selected,
-                #                 is_correct=is_correct,
-                #                 time_taken=time_taken,
-                #                 question_time_limit=question_time_limit,
-                #                 points_earned=points_earned,
-                #                 max_points=max_points,
-                #             )
-                #             db.add(answer_score)
-                #             db.commit()
-                #             logger.info(
-                #                 f"Saved answer for player {player_info['player_name']} on Q{question_id}: {points_earned} points"
-                #             )
-
-                #         await ws_manager.broadcast(
-                #             str(arena.access_code),
-                #             {
-                #                 "type": "player_score_update",
-                #                 "payload": {
-                #                     "question_id": question_id,
-                #                     "player_name": player_info["player_name"],
-                #                     "answer_selected": answer_selected,
-                #                     "is_correct": is_correct,
-                #                     "time_taken": time_taken,
-                #                     "points_earned": points_earned,
-                #                 },
-                #             },
-                #         )
-
-                #         logger.info(
-                #             f"Player {player_info['player_name']} answered Q{question_id} correctly={is_correct} in {time_taken}s, earned {points_earned} points"
-                #         )
-                #     except Exception:
-                #         logger.exception("Error processing player answer")
 
                 elif msg_type == "player_answer":
                     try:
@@ -465,26 +429,67 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                             is_correct=is_correct,
                         )
 
-                        # Save answer to database if player is registered
-                        if player_info["player_id"] and player_info["arena_id"]:
-                            answer_score = PlayerAnswerScore(
-                                player_id=player_info["player_id"],
-                                arena_id=player_info["arena_id"],
-                                question_id=question_id,
-                                answer_selected=answer_selected,
-                                is_correct=is_correct,
-                                time_taken=time_taken,
-                                question_time_limit=question_time_limit,
-                                points_earned=points_earned,
-                                max_points=max_points,
-                            )
-                            db.add(answer_score)
-                            db.commit()
-                            logger.info(
-                                f"Saved answer for player {player_info['player_name']} on Q{question_id}: {points_earned} points"
-                            )
+                        def record_player_answer_sync(
+                            db: Session,
+                            arena: Arena,
+                            player_id: int,
+                            question_id: int,
+                            answer_selected: str,
+                            is_correct: bool,
+                            time_taken: float,
+                            question_time_limit: float,
+                            max_points: float,
+                            points_earned: float,
+                        ) -> tuple[int, int]:
+                            if player_id and arena.id:
+                                answer_score = PlayerAnswerScore(
+                                    player_id=player_id,
+                                    arena_id=arena.id,
+                                    question_id=question_id,
+                                    answer_selected=answer_selected,
+                                    is_correct=is_correct,
+                                    time_taken=time_taken,
+                                    question_time_limit=question_time_limit,
+                                    points_earned=points_earned,
+                                    max_points=max_points,
+                                )
+                                db.add(answer_score)
+                                db.commit()
 
-                        # Broadcast the individual score update
+                            session_players = _players_for_arena_session_query(
+                                db, arena
+                            )
+                            total_reg = session_players.count()
+                            answered_cnt = (
+                                db.query(PlayerAnswerScore.player_id)
+                                .filter(
+                                    PlayerAnswerScore.arena_id == arena.id,
+                                    PlayerAnswerScore.question_id == question_id,
+                                    PlayerAnswerScore.player_id.in_(
+                                        session_players.with_entities(Player.id)
+                                    ),
+                                )
+                                .distinct()
+                                .count()
+                            )
+                            return total_reg, answered_cnt
+
+                        # Offload DB I/O to threadpool
+                        total_reg, answered_cnt = await run_in_threadpool(
+                            record_player_answer_sync,
+                            db=db,
+                            arena=arena,
+                            player_id=player_info["player_id"],
+                            question_id=question_id,
+                            answer_selected=answer_selected,
+                            is_correct=is_correct,
+                            time_taken=time_taken,
+                            question_time_limit=question_time_limit,
+                            max_points=max_points,
+                            points_earned=points_earned,
+                        )
+
+                        # Broadcast score
                         await ws_manager.broadcast(
                             str(arena.access_code),
                             {
@@ -500,48 +505,16 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                             },
                         )
 
-                        session_players = _players_for_arena_session_query(db, arena)
-
-                        # 2. Total registered players count
-                        total_registered_players = session_players.count()
-
-                        # 3. Count distinct answers strictly for players in this session
-                        answered_players_count = (
-                            db.query(PlayerAnswerScore.player_id)
-                            .filter(
-                                PlayerAnswerScore.arena_id == arena.id,
-                                PlayerAnswerScore.question_id == question_id,
-                                PlayerAnswerScore.player_id.in_(
-                                    session_players.with_entities(
-                                        Player.id
-                                    )  # <--- Pass the subquery targeting IDs
-                                ),
-                            )
-                            .distinct()
-                            .count()
-                        )
-
-                        logger.info(
-                            f"Q{question_id} Status: {answered_players_count}/{total_registered_players} answered for access_code={arena.access_code}"
-                        )
-
-                        # 3. Only terminate early if EVERY registered player has answered
-                        if (
-                            total_registered_players > 0
-                            and answered_players_count >= total_registered_players
-                        ):
-                            logger.info(
-                                f"All {total_registered_players} registered players answered Q{question_id}. Early terminating timer."
-                            )
-
+                        if total_reg > 0 and answered_cnt >= total_reg:
                             access_code_str = str(arena.access_code)
                             task = ws_manager.timer_tasks.pop(access_code_str, None)
                             if task:
                                 task.cancel()
                             ws_manager.timers.pop(access_code_str, None)
 
-                            scoreboard = get_arena_scoreboard(arena.id, db)
-
+                            scoreboard = await run_in_threadpool(
+                                lambda: get_arena_scoreboard(arena.id, db)
+                            )
                             await ws_manager.broadcast(
                                 access_code_str,
                                 {
@@ -558,8 +531,8 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                         logger.exception("Error processing player answer")
 
                 elif msg_type == "hide_question":
-                    # Hide question from all connected clients
                     try:
+                        ws_manager.clear_active_question(str(arena.access_code))
                         await ws_manager.broadcast(
                             str(arena.access_code),
                             {"type": "hide_question", "payload": {}},
@@ -569,7 +542,10 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
 
                 elif msg_type == "question_timeout":
                     try:
-                        scoreboard = get_arena_scoreboard(arena.id, db)
+                        ws_manager.clear_active_question(str(arena.access_code))
+                        scoreboard = await run_in_threadpool(
+                            lambda: get_arena_scoreboard(arena.id, db)
+                        )
                         await ws_manager.broadcast(
                             str(arena.access_code),
                             {
@@ -581,16 +557,16 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                                 },
                             },
                         )
-                        logger.info(
-                            f"Broadcasted scoreboard for arena {arena.id} due to question timeout"
-                        )
                     except Exception:
                         logger.exception("Error broadcasting scoreboard on timeout")
 
-                elif msg_type == "end_game" or msg_type == "game_over":
+                elif msg_type in ("end_game", "game_over"):
                     try:
-                        finalization = await close_arena_and_build_payout_ledger(
-                            arena_id=arena.id, db=db
+                        ws_manager.clear_active_question(str(arena.access_code))
+                        finalization = await run_in_threadpool(
+                            lambda: close_arena_and_build_payout_ledger(
+                                arena_id=arena.id, db=db
+                            )
                         )
 
                         await ws_manager.broadcast(
@@ -609,13 +585,7 @@ async def lobby_websocket(websocket: WebSocket, access_code: str):
                                 },
                             },
                         )
-                        # Close all websocket connections for this arena to avoid lingering sockets
-                        try:
-                            await ws_manager.close_room(str(arena.access_code))
-                        except Exception:
-                            logger.exception(
-                                "Error closing websockets for arena %s", arena.id
-                            )
+                        await ws_manager.close_room(str(arena.access_code))
                     except Exception as e:
                         logger.exception(
                             f"Critical payout calculation failure on arena {arena.id}: {e}"
