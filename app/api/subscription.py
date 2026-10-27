@@ -44,7 +44,9 @@ def apply_converted_plan_pricing(
     target_currency = base_currency
 
     if auth.org_id:
-        organization = db.query(Organization).filter(Organization.id == auth.org_id).first()
+        organization = (
+            db.query(Organization).filter(Organization.id == auth.org_id).first()
+        )
         if organization:
             target_currency = OrganizationService.resolve_organization_currency(
                 db, organization
@@ -320,10 +322,10 @@ async def create_payment_intent(
         }
 
     except Exception as e:
-        logger.error(f"Stripe error creating payment intent: {str(e)}")
+        logger.error(f"Stripe error creating payment intent: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to create payment intent: {str(e)}",
+            detail=f"Failed to create payment intent: {e!s}",
         )
 
 
@@ -404,7 +406,7 @@ async def confirm_payment(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error confirming payment: {str(e)}")
+        logger.error(f"Error confirming payment: {e!s}")
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -460,12 +462,10 @@ async def buy_tokens_from_wallet(
         )
 
     except ValueError as e:
-        logger.warning(
-            f"Token purchase validation error for org {auth.org_id}: {str(e)}"
-        )
+        logger.warning(f"Token purchase validation error for org {auth.org_id}: {e!s}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Error purchasing tokens for org {auth.org_id}: {str(e)}")
+        logger.error(f"Error purchasing tokens for org {auth.org_id}: {e!s}")
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

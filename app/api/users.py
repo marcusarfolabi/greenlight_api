@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
@@ -17,7 +17,9 @@ async def get_current_user_profile(
     """Get the authenticated user's profile."""
     user = UserService.get_user(db, int(current_user.user_id))
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
     return user
 
 
@@ -30,7 +32,9 @@ async def update_user_profile(
     """Update the authenticated user's profile."""
     user = UserService.update_user(db, int(current_user.user_id), user_update)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
     return user
 
 
@@ -39,7 +43,9 @@ async def get_user(user_id: int, db: Session = Depends(get_db)):
     """Get a user by ID."""
     user = UserService.get_user(db, user_id)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
     return user
 
 
@@ -51,6 +57,7 @@ async def delete_current_user(
     """Delete the authenticated user's account."""
     user = UserService.delete_user(db, int(current_user.user_id))
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
